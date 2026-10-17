@@ -4,6 +4,10 @@ members = [
     "contracts/invoice-escrow",
     "contracts/invoice-token",
     "contracts/payment-distributor",
+    "contracts/invoice-refund",
+    "contracts/invoice-maturity",
+    "contracts/invoice-snapshot",
+    "contracts/multisig-admin",
 ]
 
 [workspace.dependencies]
