@@ -5,6 +5,7 @@ members = [
     "contracts/fee-treasury",
     "contracts/invoice-escrow",
     "contracts/invoice-token",
+    "contracts/order-book",
     "contracts/partial-settlement",
     "contracts/payment-distributor",
     "contracts/watchlist",
