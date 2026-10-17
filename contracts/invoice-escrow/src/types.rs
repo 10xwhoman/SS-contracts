@@ -45,6 +45,10 @@ pub enum StorageKey {
     InstallmentSchedule(soroban_sdk::Symbol),
     /// Instance: pending admin parameter change awaiting timelock expiry.
     PendingParamChange,
+    /// Persistent: secondary-market buy limit by invoice id.
+    BuyLimit(soroban_sdk::BytesN<32>),
+    /// Persistent: a wallet's current buy-limit window by (invoice_id, wallet).
+    BuyWindow(soroban_sdk::BytesN<32>, soroban_sdk::Address),
 }
 
 /// Registered invoice metadata and funding parameters stored in persistent storage.
