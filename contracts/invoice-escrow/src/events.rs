@@ -402,6 +402,21 @@ pub fn max_investors_updated(env: &Env, count: u32) {
         .publish((Symbol::new(env, "max_investors_updated"),), count);
 }
 
+/// Publish an over-subscription result so clients can display accepted and returned funds.
+pub fn partial_fill_executed(
+    env: &Env,
+    invoice_id: &BytesN<32>,
+    investor: &Address,
+    requested: i128,
+    accepted: i128,
+    returned: i128,
+) {
+    env.events().publish(
+        (Symbol::new(env, "PartialFillExecuted"), invoice_id.clone()),
+        (investor.clone(), requested, accepted, returned),
+    );
+}
+
 // ── Issue #443: Timelock controller events ────────────────────────────────────
 
 /// Emitted when an admin proposes a timelocked parameter change.

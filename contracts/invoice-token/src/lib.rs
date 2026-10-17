@@ -12,7 +12,7 @@ mod events;
 mod storage;
 mod types;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String as SorobanString, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Env, IntoVal, String as SorobanString, Symbol, Vec};
 
 use crate::errors::Error;
 use crate::types::{is_zero_address, OwnershipHistoryRecord, TokenMetadata, MAX_DECIMALS};
@@ -81,6 +81,7 @@ impl InvoiceToken {
             invoice_id,
             transfer_locked: true, // default locked until settlement
             paused: false,
+            transfer_restriction: None,
         };
         storage::set_metadata(&env, &meta);
         storage::set_total_supply(&env, 0);
@@ -186,6 +187,13 @@ impl InvoiceToken {
         ensure_account_not_frozen(&env, &to)?;
         if meta.transfer_locked && from != meta.admin {
             return Err(Error::TransferLocked);
+        }
+        if let Some(restriction) = meta.transfer_restriction.clone() {
+            env.invoke_contract::<()>(
+                &restriction,
+                &Symbol::new(&env, "validate_transfer"),
+                soroban_sdk::vec![&env, meta.invoice_id.clone().into_val(&env), from.to_val()],
+            );
         }
 
         let fee_bps = storage::get_fee_bps(&env);
@@ -350,6 +358,13 @@ impl InvoiceToken {
         ensure_account_not_frozen(&env, &to)?;
         if meta.transfer_locked && from != meta.admin {
             return Err(Error::TransferLocked);
+        }
+        if let Some(restriction) = meta.transfer_restriction.clone() {
+            env.invoke_contract::<()>(
+                &restriction,
+                &Symbol::new(&env, "validate_transfer"),
+                soroban_sdk::vec![&env, meta.invoice_id.clone().into_val(&env), from.to_val()],
+            );
         }
         let ledger = env.ledger().sequence();
         let allow = storage::get_allowance_data(&env, &from, &spender)
@@ -582,6 +597,18 @@ impl InvoiceToken {
         meta.transfer_locked = locked;
         storage::set_metadata(&env, &meta);
         events::transfer_locked_updated_event(&env, old_locked, locked);
+        Ok(())
+    }
+
+    /// Configure the optional lock-up contract consulted before holder transfers.
+    pub fn set_transfer_restriction(
+        env: Env,
+        restriction: Option<Address>,
+    ) -> Result<(), Error> {
+        let mut meta = storage::get_metadata(&env).ok_or(Error::NotInit)?;
+        meta.admin.require_auth();
+        meta.transfer_restriction = restriction;
+        storage::set_metadata(&env, &meta);
         Ok(())
     }
 
