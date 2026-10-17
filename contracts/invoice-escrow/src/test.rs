@@ -7598,3 +7598,267 @@ fn test_escrow_state_unchanged_after_capacity_exceeded_panic() {
     assert_eq!(after.funders.len(), before.funders.len());
     assert_eq!(after.paid_amt, before.paid_amt);
 }
+
+// ── Minimum Investment Enforcement ─────────────────────────────────────────
+
+/// Helper: set up an initialized escrow contract with a created escrow.
+struct MinInvestmentEnv {
+    env: Env,
+    client: InvoiceEscrowClient<'static>,
+    admin: Address,
+    buyer: Address,
+    invoice_id: Symbol,
+    purchase_price: i128,
+}
+
+fn min_investment_env(purchase_price: i128, invoice_tag: &str) -> MinInvestmentEnv {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let escrow_id = env.register(InvoiceEscrow, ());
+    let client = InvoiceEscrowClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let seller = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let payer = Address::generate(&env);
+    let pt_admin = Address::generate(&env);
+    let pt_id = env.register_stellar_asset_contract_v2(pt_admin);
+    let pt_asset = AssetClient::new(&env, &pt_id.address());
+    let inv_token_id = env.register(MockInvoiceToken, ());
+
+    client.initialize(&admin, &300);
+    pt_asset.mint(&buyer, &100_000);
+
+    let invoice_id = Symbol::new(&env, invoice_tag);
+    client.create_escrow(
+        &invoice_id,
+        &seller,
+        &payer,
+        &purchase_price,
+        &purchase_price,
+        &1_000_000,
+        &pt_id.address(),
+        &inv_token_id,
+        &test_commitment(&env, "min_investment"),
+        &None,
+    );
+
+    // Leak env-scoped client to 'static so it can live in the struct.
+    let client = unsafe { core::mem::transmute::<_, InvoiceEscrowClient<'static>>(client) };
+
+    MinInvestmentEnv {
+        env,
+        client,
+        admin,
+        buyer,
+        invoice_id,
+        purchase_price,
+    }
+}
+
+#[test]
+fn test_min_investment_rejects_below_minimum() {
+    let t = min_investment_env(5_000, "INV_MIN1");
+    t.client.set_min_investment(&t.admin, &t.invoice_id, &1_000);
+
+    // Attempt below the floor is rejected with the dedicated error.
+    let result = t.client.try_fund_escrow(&t.invoice_id, &t.buyer, &999);
+    assert_eq!(result, Err(Ok(Error::MinimumInvestmentViolation)));
+
+    // The required minimum and the attempted amount are both knowable to the
+    // caller: the view exposes the floor, the caller knows what it attempted.
+    assert_eq!(t.client.get_min_investment(&t.invoice_id), 1_000);
+
+    // No state change from the rejected funding attempt.
+    let data = t.client.get_escrow(&t.invoice_id);
+    assert_eq!(data.funded_amt, 0);
+    assert_eq!(data.status, EscrowStatus::Created);
+}
+
+#[test]
+fn test_min_investment_accepts_at_minimum() {
+    let t = min_investment_env(5_000, "INV_MIN2");
+    t.client.set_min_investment(&t.admin, &t.invoice_id, &1_000);
+
+    // Exact minimum is accepted.
+    t.client.fund_escrow(&t.invoice_id, &t.buyer, &1_000);
+    let data = t.client.get_escrow(&t.invoice_id);
+    assert_eq!(data.funded_amt, 1_000);
+    assert_eq!(data.status, EscrowStatus::Created);
+}
+
+#[test]
+fn test_min_investment_accepts_above_minimum() {
+    let t = min_investment_env(5_000, "INV_MIN3");
+    t.client.set_min_investment(&t.admin, &t.invoice_id, &1_000);
+
+    // Above minimum is accepted.
+    t.client.fund_escrow(&t.invoice_id, &t.buyer, &2_500);
+    let data = t.client.get_escrow(&t.invoice_id);
+    assert_eq!(data.funded_amt, 2_500);
+    assert_eq!(data.status, EscrowStatus::Created);
+}
+
+#[test]
+fn test_min_investment_rejection_then_valid_funding() {
+    let t = min_investment_env(5_000, "INV_MIN4");
+    t.client.set_min_investment(&t.admin, &t.invoice_id, &1_000);
+
+    // Rejected attempt below floor...
+    let result = t.client.try_fund_escrow(&t.invoice_id, &t.buyer, &500);
+    assert_eq!(result, Err(Ok(Error::MinimumInvestmentViolation)));
+
+    // ...followed by a successful compliant investment.
+    t.client.fund_escrow(&t.invoice_id, &t.buyer, &1_000);
+    assert_eq!(t.client.get_escrow(&t.invoice_id).funded_amt, 1_000);
+}
+
+#[test]
+fn test_min_investment_zero_allows_any_positive_amount() {
+    let t = min_investment_env(5_000, "INV_MIN5");
+
+    // Default minimum is 0 (no floor).
+    assert_eq!(t.client.get_min_investment(&t.invoice_id), 0);
+
+    // Explicitly setting 0 (while unfunded) also behaves as "no floor".
+    t.client.set_min_investment(&t.admin, &t.invoice_id, &0);
+
+    // Smallest positive amount accepted.
+    t.client.fund_escrow(&t.invoice_id, &t.buyer, &1);
+    assert_eq!(t.client.get_escrow(&t.invoice_id).funded_amt, 1);
+
+    // Another tiny amount is still accepted with no floor.
+    t.client.fund_escrow(&t.invoice_id, &t.buyer, &1);
+    assert_eq!(t.client.get_escrow(&t.invoice_id).funded_amt, 2);
+}
+
+#[test]
+fn test_get_min_investment_returns_correct_value_for_all_invoices() {
+    let t = min_investment_env(5_000, "INV_MIN6");
+
+    // Create a second escrow with a different minimum.
+    let seller = Address::generate(&t.env);
+    let payer = Address::generate(&t.env);
+    let pt_admin = Address::generate(&t.env);
+    let pt_id = t.env.register_stellar_asset_contract_v2(pt_admin);
+    let second_invoice = Symbol::new(&t.env, "INV_MIN7");
+    t.client.create_escrow(
+        &second_invoice,
+        &seller,
+        &payer,
+        &5_000,
+        &5_000,
+        &1_000_000,
+        &pt_id.address(),
+        &t.env.register(MockInvoiceToken, ()),
+        &test_commitment(&t.env, "min_investment_2"),
+        &None,
+    );
+
+    // Default 0 for both, then set distinct values.
+    assert_eq!(t.client.get_min_investment(&t.invoice_id), 0);
+    assert_eq!(t.client.get_min_investment(&second_invoice), 0);
+
+    t.client.set_min_investment(&t.admin, &t.invoice_id, &1_000);
+    t.client.set_min_investment(&t.admin, &second_invoice, &7);
+
+    assert_eq!(t.client.get_min_investment(&t.invoice_id), 1_000);
+    assert_eq!(t.client.get_min_investment(&second_invoice), 7);
+}
+
+#[test]
+fn test_get_min_investment_not_found() {
+    let t = min_investment_env(5_000, "INV_MIN8");
+    let missing = Symbol::new(&t.env, "INV_MISS");
+    let result = t.client.try_get_min_investment(&missing);
+    assert_eq!(result, Err(Ok(Error::EscrowNotFound)));
+}
+
+#[test]
+fn test_set_min_investment_requires_admin() {
+    let t = min_investment_env(5_000, "INV_MIN9");
+    let attacker = Address::generate(&t.env);
+
+    let result = t
+        .client
+        .try_set_min_investment(&attacker, &t.invoice_id, &1_000);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+
+    // Floor unchanged.
+    assert_eq!(t.client.get_min_investment(&t.invoice_id), 0);
+}
+
+#[test]
+fn test_set_min_investment_rejects_negative() {
+    let t = min_investment_env(5_000, "INV_MIN10");
+    let result = t
+        .client
+        .try_set_min_investment(&t.admin, &t.invoice_id, &-1);
+    assert_eq!(result, Err(Ok(Error::InvalidAmount)));
+}
+
+#[test]
+fn test_set_min_investment_rejected_after_partial_funding() {
+    let t = min_investment_env(5_000, "INV_MIN11");
+    t.client.set_min_investment(&t.admin, &t.invoice_id, &100);
+    t.client.fund_escrow(&t.invoice_id, &t.buyer, &100);
+
+    // Once any funding exists, the floor is frozen.
+    let result = t
+        .client
+        .try_set_min_investment(&t.admin, &t.invoice_id, &1_000);
+    assert_eq!(result, Err(Ok(Error::EscrowFunded)));
+    assert_eq!(t.client.get_min_investment(&t.invoice_id), 100);
+}
+
+#[test]
+fn test_set_min_investment_rejected_on_cancelled_escrow() {
+    let t = min_investment_env(5_000, "INV_MIN12");
+    let seller = {
+        let data = t.client.get_escrow(&t.invoice_id);
+        data.seller.clone()
+    };
+    t.client.cancel_escrow(&t.invoice_id, &seller);
+
+    let result = t
+        .client
+        .try_set_min_investment(&t.admin, &t.invoice_id, &1_000);
+    assert_eq!(result, Err(Ok(Error::EscrowFunded)));
+}
+
+#[test]
+fn test_min_investment_guard_applies_per_invoice() {
+    let t = min_investment_env(5_000, "INV_MIN13");
+
+    // Second invoice created without a floor.
+    let seller = Address::generate(&t.env);
+    let payer = Address::generate(&t.env);
+    let pt_admin = Address::generate(&t.env);
+    let pt_id = t.env.register_stellar_asset_contract_v2(pt_admin);
+    let second_invoice = Symbol::new(&t.env, "INV_MIN14");
+    t.client.create_escrow(
+        &second_invoice,
+        &seller,
+        &payer,
+        &5_000,
+        &5_000,
+        &1_000_000,
+        &pt_id.address(),
+        &t.env.register(MockInvoiceToken, ()),
+        &test_commitment(&t.env, "min_investment_3"),
+        &None,
+    );
+
+    t.client.set_min_investment(&t.admin, &t.invoice_id, &1_000);
+
+    // Floor applies to the first invoice only.
+    let result = t.client.try_fund_escrow(&t.invoice_id, &t.buyer, &1);
+    assert_eq!(result, Err(Ok(Error::MinimumInvestmentViolation)));
+
+    // Second invoice has no floor: tiny funding is fine.
+    let buyer2 = Address::generate(&t.env);
+    let pt_asset2 = AssetClient::new(&t.env, &pt_id.address());
+    pt_asset2.mint(&buyer2, &10);
+    t.client.fund_escrow(&second_invoice, &buyer2, &1);
+    assert_eq!(t.client.get_escrow(&second_invoice).funded_amt, 1);
+}

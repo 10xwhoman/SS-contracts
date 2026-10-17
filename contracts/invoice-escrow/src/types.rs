@@ -29,6 +29,8 @@ pub struct Config {
     pub fee_bps: u32,
     /// Optional payment distributor contract used for settlement/refund fan-out.
     pub payment_distributor: Option<soroban_sdk::Address>,
+    /// Optional referral contract called on each investment to accrue referral fees.
+    pub referral_contract: Option<soroban_sdk::Address>,
     /// Emergency pause flag for lifecycle-changing operations.
     pub paused: bool,
     /// When true, `fund_escrow` requires the buyer to be on the whitelist.
@@ -89,6 +91,9 @@ pub struct EscrowData {
     pub status: EscrowStatus,
     /// Minimum chunk size required for each partial funding operation (except the final one).
     pub funding_milestone: Option<i128>,
+    /// Minimum investment amount required per funding contribution.
+    /// A value of 0 means no floor (any positive amount is accepted).
+    pub min_investment: i128,
     /// Commitment hash: immutable on-chain anchor for off-chain invoice data (PDF hash, ERP ID, etc.).
     /// Set at creation, cannot be modified. SHA-256 hash (32 bytes).
     pub commitment: soroban_sdk::BytesN<32>,

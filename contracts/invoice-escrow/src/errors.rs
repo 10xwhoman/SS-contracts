@@ -62,4 +62,8 @@ pub enum Error {
     InvalidInvoiceToken = 27,
     /// Payment token and invoice token must be different contracts.
     IdenticalTokens = 28,
+    /// Investment amount is below the per-invoice minimum investment floor.
+    /// A minimum of 0 means no floor; this error is only returned when the
+    /// configured minimum is positive and the attempted amount is strictly less.
+    MinimumInvestmentViolation = 29,
 }

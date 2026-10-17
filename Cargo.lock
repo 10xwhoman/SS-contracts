@@ -870,6 +870,7 @@ name = "invoice-escrow"
 version = "0.1.0"
 dependencies = [
  "invoice-token",
+ "referral",
  "soroban-sdk",
 ]
 
@@ -1156,6 +1157,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+]
+
+[[package]]
+name = "referral"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "reputation"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -1749,6 +1764,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "waitlist"
+version = "0.1.0"
+dependencies = [
+ "invoice-escrow",
+ "soroban-sdk",
 ]
 
 [[package]]
