@@ -1,0 +1,15 @@
+[package]
+name = "invoice-extension"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Holder-voted invoice maturity date extensions"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

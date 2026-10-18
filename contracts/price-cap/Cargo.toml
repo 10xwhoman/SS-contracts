@@ -1,0 +1,15 @@
+[package]
+name = "price-cap"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Secondary market listing price cap derived from invoice settlement yield"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
