@@ -1,0 +1,15 @@
+[package]
+name = "alert-subscription"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Investor alert subscription preferences for on-chain notification events"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
