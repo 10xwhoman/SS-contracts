@@ -1,0 +1,15 @@
+[package]
+name = "bulk-listing"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Secondary market bulk listing creation in a single atomic call"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
