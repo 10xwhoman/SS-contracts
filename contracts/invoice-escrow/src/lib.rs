@@ -173,6 +173,7 @@ impl InvoiceEscrow {
             admin: admin.clone(),
             fee_bps: platform_fee_bps,
             payment_distributor: None,
+            referral_contract: None,
             paused: false,
             whitelist_enabled: false,
             min_investment: 0,
@@ -596,12 +597,10 @@ impl InvoiceEscrow {
                         (EscrowStatus::Cancelled as u32).into_val(&env)
                     ],
                 );
-            } else {
-                if let Some(funder) = &funder_opt {
-                    let funder_amt = storage::get_funder_amount(&env, invoice_id.clone(), funder);
-                    if funder_amt > 0 {
-                        token.transfer(&contract, funder, &funder_amt);
-                    }
+            } else if let Some(funder) = &funder_opt {
+                let funder_amt = storage::get_funder_amount(&env, invoice_id.clone(), funder);
+                if funder_amt > 0 {
+                    token.transfer(&contract, funder, &funder_amt);
                 }
             }
 
@@ -980,11 +979,30 @@ impl InvoiceEscrow {
         if data.status == EscrowStatus::Funded {
             events::escrow_status_changed(
                 env,
-                invoice_id,
+                invoice_id.clone(),
                 EscrowStatus::Funded,
                 env.ledger().timestamp(),
             );
         }
+
+        // Best-effort referral fee accrual: if a referral contract is configured,
+        // notify it of this investment so it can accrue rewards to the buyer's referrer.
+        // Errors from the referral contract are swallowed so a referral misconfiguration
+        // never blocks a legitimate investment.
+        if let Some(referral_addr) = config.referral_contract.as_ref() {
+            let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+                referral_addr,
+                &Symbol::new(env, "accrue_referral_fee"),
+                soroban_sdk::vec![
+                    env,
+                    contract.to_val(),
+                    invoice_id.into_val(env),
+                    buyer.to_val(),
+                    amount.into_val(env),
+                ],
+            );
+        }
+
         Ok(())
     }
 
@@ -1475,6 +1493,29 @@ impl InvoiceEscrow {
         config.payment_distributor = Some(payment_distributor.clone());
         storage::set_config(&env, &config);
         events::payment_distributor_updated(&env, old_distributor.is_some(), &payment_distributor);
+        Ok(())
+    }
+
+    /// Set the referral contract called on each investment to accrue referral fees.
+    /// Admin only. Pass the same address again to update, or a zero address is not
+    /// accepted — use `clear_referral_contract` to remove the binding.
+    pub fn set_referral_contract(env: Env, referral_contract: Address) -> Result<(), Error> {
+        let mut config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        let admin = config.admin.clone();
+        admin.require_auth();
+        config.referral_contract = Some(referral_contract);
+        storage::set_config(&env, &config);
+        Ok(())
+    }
+
+    /// Remove the referral contract binding so investments no longer trigger
+    /// referral fee accrual. Admin only.
+    pub fn clear_referral_contract(env: Env) -> Result<(), Error> {
+        let mut config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        let admin = config.admin.clone();
+        admin.require_auth();
+        config.referral_contract = None;
+        storage::set_config(&env, &config);
         Ok(())
     }
 

@@ -85,6 +85,8 @@ pub struct Config {
     pub fee_bps: u32,
     /// Optional payment distributor contract used for settlement/refund fan-out.
     pub payment_distributor: Option<soroban_sdk::Address>,
+    /// Optional referral contract called on each investment to accrue referral fees.
+    pub referral_contract: Option<soroban_sdk::Address>,
     /// Emergency pause flag for lifecycle-changing operations.
     pub paused: bool,
     /// When true, `fund_escrow` requires the buyer to be on the whitelist.

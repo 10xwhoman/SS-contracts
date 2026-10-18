@@ -268,6 +268,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "categorisation-registry"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "cc"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -687,7 +694,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
-name = "fee-config"
+name = "fee-treasury"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
@@ -945,6 +952,7 @@ version = "0.1.0"
 dependencies = [
  "invoice-token",
  "proptest",
+ "referral",
  "soroban-sdk",
 ]
 
@@ -1123,6 +1131,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "order-book"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "p256"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1132,6 +1147,13 @@ dependencies = [
  "elliptic-curve",
  "primeorder",
  "sha2",
+]
+
+[[package]]
+name = "partial-settlement"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -1351,10 +1373,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "referral"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "reputation"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
 
 [[package]]
 name = "rfc6979"
@@ -2021,6 +2057,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "waitlist"
+version = "0.1.0"
+dependencies = [
+ "invoice-escrow",
+ "soroban-sdk",
 ]
 
 [[package]]

@@ -125,6 +125,12 @@
                           },
                           {
                             "key": {
+                              "symbol": "referral_contract"
+                            },
+                            "val": "void"
+                          },
+                          {
+                            "key": {
                               "symbol": "whitelist_enabled"
                             },
                             "val": {
