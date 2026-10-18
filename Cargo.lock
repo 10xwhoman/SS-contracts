@@ -349,6 +349,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bulk-listing"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1245,6 +1252,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoice-pool"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
 name = "invoice-token"
 version = "0.1.0"
 dependencies = [
@@ -1384,6 +1398,13 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "loyalty-tier"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
 
 [[package]]
 name = "macro-string"
@@ -2813,6 +2834,13 @@ dependencies = [
 
 [[package]]
 name = "yield-accrual"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
+name = "yield-booster"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk 27.0.6",
