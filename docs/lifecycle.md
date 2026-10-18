@@ -39,12 +39,17 @@ Seller                Escrow Contract          Investor               Debtor
 - **Action:** Calls `fund_escrow`. Transfers payment tokens into contract escrow vault.
 - **State:** `invoice-token` contract mints pro-rata shares to investor. Escrow enters `Funded` state. Transfer locks activated.
 
-### Stage 3: Settlement (`Settled`)
-- **Actor:** Debtor (Invoice Payer)
-- **Action:** Calls `record_payment` before or at due date.
-- **State:** `payment-distributor` executes fee deduction and pro-rata payout fan-out to seller and investors. Escrow enters `Settled` state. Token locks released.
+### Stage 3: Installment Schedule (optional, pre-payment)
+- **Actor:** Seller
+- **Action:** While the escrow is still `Created`/`Funded` with `paid_amt == 0`, the seller may call `set_installment_schedule` with a sequence of future installments whose amounts sum exactly to `face_value`.
+- **State:** Cumulative milestones are stored per invoice. Each subsequent `record_payment` marks every milestone whose cumulative target has been reached as settled (emitting `installment_settled`). Full settlement (including early-settlement discounts or emergency release) settles any remaining milestones.
 
-### Alternative Stage 4: Refund / Default (`Refunded`)
+### Stage 4: Settlement (`Settled`)
+- **Actor:** Debtor (Invoice Payer)
+- **Action:** Calls `record_payment` before or at due date (full payment or matching installments).
+- **State:** `payment-distributor` executes fee deduction and pro-rata payout fan-out to seller and investors. Escrow enters `Settled` state. Token locks released. All installment milestones are marked settled.
+
+### Alternative Stage 5: Refund / Default (`Refunded`)
 - **Actor:** Admin / Seller (if past due date without debtor payment)
 - **Action:** Calls `refund`.
 - **State:** Escrowed payment tokens returned to investors; invoice tokens burned. Escrow enters `Refunded` state.

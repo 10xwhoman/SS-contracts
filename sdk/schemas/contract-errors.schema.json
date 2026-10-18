@@ -1,0 +1,2237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stellarstate.github.io/ss-contracts/schemas/contract-errors.schema.json",
+  "title": "StellarSettle JSON-RPC contract error response",
+  "description": "A JSON-RPC error response whose data identifies a Soroban contract error.",
+  "type": "object",
+  "properties": {
+    "jsonrpc": {
+      "const": "2.0"
+    },
+    "id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/ContractError"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "data"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "jsonrpc",
+    "id",
+    "error"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "ContractError": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "AlreadyInit"
+            },
+            "code": {
+              "const": 1
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "NotInit"
+            },
+            "code": {
+              "const": 2
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "Unauthorized"
+            },
+            "code": {
+              "const": 3
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidAmount"
+            },
+            "code": {
+              "const": 4
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidFeeBps"
+            },
+            "code": {
+              "const": 5
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "EscrowNotFound"
+            },
+            "code": {
+              "const": 6
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "EscrowExists"
+            },
+            "code": {
+              "const": 7
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "EscrowFunded"
+            },
+            "code": {
+              "const": 8
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "EscrowNotFunded"
+            },
+            "code": {
+              "const": 9
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "AlreadySettled"
+            },
+            "code": {
+              "const": 10
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "RefundNotAllowed"
+            },
+            "code": {
+              "const": 11
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "TransferFailed"
+            },
+            "code": {
+              "const": 12
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "Overflow"
+            },
+            "code": {
+              "const": 13
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "EscrowCancelled"
+            },
+            "code": {
+              "const": 14
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "Paused"
+            },
+            "code": {
+              "const": 15
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidPayer"
+            },
+            "code": {
+              "const": 16
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidDueDate"
+            },
+            "code": {
+              "const": 17
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidAssetDecimals"
+            },
+            "code": {
+              "const": 18
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "NonceAlreadyUsed"
+            },
+            "code": {
+              "const": 19
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "EscrowNotSettled"
+            },
+            "code": {
+              "const": 20
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "NotWhitelisted"
+            },
+            "code": {
+              "const": 21
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "SignatureExpired"
+            },
+            "code": {
+              "const": 22
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidMilestoneAmount"
+            },
+            "code": {
+              "const": 23
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "CancelNotAllowed"
+            },
+            "code": {
+              "const": 24
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidPenaltyConfig"
+            },
+            "code": {
+              "const": 25
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidPaymentToken"
+            },
+            "code": {
+              "const": 26
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidInvoiceToken"
+            },
+            "code": {
+              "const": 27
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "IdenticalTokens"
+            },
+            "code": {
+              "const": 28
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "NoPositionFound"
+            },
+            "code": {
+              "const": 29
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidInvoiceStatus"
+            },
+            "code": {
+              "const": 30
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "BelowMinimumInvestment"
+            },
+            "code": {
+              "const": 31
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "FundingTargetNotReached"
+            },
+            "code": {
+              "const": 32
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "ZeroAmount"
+            },
+            "code": {
+              "const": 33
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "AmountBelowMinimum"
+            },
+            "code": {
+              "const": 34
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidAddress"
+            },
+            "code": {
+              "const": 35
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidDuration"
+            },
+            "code": {
+              "const": 36
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "NotEmergencyAdmin"
+            },
+            "code": {
+              "const": 37
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "AlreadyApproved"
+            },
+            "code": {
+              "const": 38
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "ThresholdNotMet"
+            },
+            "code": {
+              "const": 39
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "EmergencyNotConfigured"
+            },
+            "code": {
+              "const": 40
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidLimit"
+            },
+            "code": {
+              "const": 41
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "LimitExceeded"
+            },
+            "code": {
+              "const": 42
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvoiceAlreadyExists"
+            },
+            "code": {
+              "const": 43
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidYield"
+            },
+            "code": {
+              "const": 44
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "FundingDeadlineNotPassed"
+            },
+            "code": {
+              "const": 45
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InsufficientRepayment"
+            },
+            "code": {
+              "const": 46
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "DeadlineNotExtended"
+            },
+            "code": {
+              "const": 47
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "EscrowOverdue"
+            },
+            "code": {
+              "const": 48
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "EscrowNotOverdue"
+            },
+            "code": {
+              "const": 49
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "NotDisputed"
+            },
+            "code": {
+              "const": 50
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "AlreadyResolved"
+            },
+            "code": {
+              "const": 51
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "DisputeTimedOut"
+            },
+            "code": {
+              "const": 52
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidEarlySettlement"
+            },
+            "code": {
+              "const": 53
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidInstallmentSchedule"
+            },
+            "code": {
+              "const": 54
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "FeeTooHigh"
+            },
+            "code": {
+              "const": 55
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "MaxInvestorsReached"
+            },
+            "code": {
+              "const": 57
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "InvalidMaxInvestors"
+            },
+            "code": {
+              "const": 56
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "TokenNotAccepted"
+            },
+            "code": {
+              "const": 58
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "SameAdminApproval"
+            },
+            "code": {
+              "const": 59
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-escrow"
+            },
+            "name": {
+              "const": "SettlementNotProposed"
+            },
+            "code": {
+              "const": 60
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "AlreadyInit"
+            },
+            "code": {
+              "const": 1
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "NotInit"
+            },
+            "code": {
+              "const": 2
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "Unauthorized"
+            },
+            "code": {
+              "const": 3
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "RoleNotGranted"
+            },
+            "code": {
+              "const": 4
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "InvalidAmount"
+            },
+            "code": {
+              "const": 5
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "InsufficientBalance"
+            },
+            "code": {
+              "const": 6
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "InsufficientBalanceForFee"
+            },
+            "code": {
+              "const": 7
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "InsufficientAllowance"
+            },
+            "code": {
+              "const": 8
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "AllowanceExpired"
+            },
+            "code": {
+              "const": 9
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "TransferLocked"
+            },
+            "code": {
+              "const": 10
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "Overflow"
+            },
+            "code": {
+              "const": 11
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "InvalidExpiration"
+            },
+            "code": {
+              "const": 12
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "Paused"
+            },
+            "code": {
+              "const": 13
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "InvalidDecimals"
+            },
+            "code": {
+              "const": 14
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "InvalidMetadata"
+            },
+            "code": {
+              "const": 15
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "AllowanceNotFound"
+            },
+            "code": {
+              "const": 16
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "BatchLengthMismatch"
+            },
+            "code": {
+              "const": 17
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "InvalidFeeBps"
+            },
+            "code": {
+              "const": 18
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "AccountFrozen"
+            },
+            "code": {
+              "const": 19
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "AccountNotFrozen"
+            },
+            "code": {
+              "const": 20
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "invoice-token"
+            },
+            "name": {
+              "const": "InvalidAddress"
+            },
+            "code": {
+              "const": 21
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "AlreadyInit"
+            },
+            "code": {
+              "const": 1
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "NotInit"
+            },
+            "code": {
+              "const": 2
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "InvalidAmount"
+            },
+            "code": {
+              "const": 3
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "Unauthorized"
+            },
+            "code": {
+              "const": 4
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "InvalidEscrowStatus"
+            },
+            "code": {
+              "const": 5
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "NothingToDistribute"
+            },
+            "code": {
+              "const": 6
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "RefundAlreadyDistributed"
+            },
+            "code": {
+              "const": 7
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "Overflow"
+            },
+            "code": {
+              "const": 8
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "WrongDistributor"
+            },
+            "code": {
+              "const": 9
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "InvalidBps"
+            },
+            "code": {
+              "const": 10
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "ReentrancyDetected"
+            },
+            "code": {
+              "const": 11
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "InvalidReferralCut"
+            },
+            "code": {
+              "const": 12
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "SplitsExceedTotal"
+            },
+            "code": {
+              "const": 13
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "InvalidSplit"
+            },
+            "code": {
+              "const": 14
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "EmptyAssetList"
+            },
+            "code": {
+              "const": 15
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "AssetMismatch"
+            },
+            "code": {
+              "const": 16
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "NothingToWithdraw"
+            },
+            "code": {
+              "const": 17
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "UnauthorizedEscrow"
+            },
+            "code": {
+              "const": 18
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "InsufficientBalance"
+            },
+            "code": {
+              "const": 19
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "NothingToSweep"
+            },
+            "code": {
+              "const": 20
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "EmptyBatch"
+            },
+            "code": {
+              "const": 21
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "BatchTooLarge"
+            },
+            "code": {
+              "const": 22
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "TooManyFeeRecipients"
+            },
+            "code": {
+              "const": 23
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "InvalidFeeSplit"
+            },
+            "code": {
+              "const": 24
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "InvalidBonusRate"
+            },
+            "code": {
+              "const": 25
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "TooManyRefundRecipients"
+            },
+            "code": {
+              "const": 26
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "InvalidRefundWeight"
+            },
+            "code": {
+              "const": 27
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "const": "payment-distributor"
+            },
+            "name": {
+              "const": "NothingToRefund"
+            },
+            "code": {
+              "const": 28
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "code"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

@@ -13,6 +13,38 @@ env:
   CARGO_TERM_COLOR: always
   WASM_MAX_BYTES: 262144
 jobs:
+  typescript-sdk:
+    name: TypeScript SDK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Install SDK dependencies
+        run: npm ci
+        working-directory: sdk
+
+      - name: Build and test SDK
+        run: npm test
+        working-directory: sdk
+
+  toolchain-sync:
+    name: Toolchain Sync Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify rust-toolchain.toml matches workflows/scripts/docs
+        run: bash scripts/check-toolchain-sync.sh
+
   check-and-test:
     name: Lint, Test & Build WASM (${{ matrix.toolchain }})
     runs-on: ubuntu-latest
@@ -88,6 +120,150 @@ jobs:
               exit 1
             fi
           done
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: cargo-audit
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        run: cargo audit
+
+  deny:
+    name: Licence & Source Policy (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+
+      - name: Check advisories, licences, bans and sources
+        run: cargo deny --all-features check
+
+  wasm-size-check:
+    name: WASM Size Regression Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: wasm32v1-none
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-size-${{ github.head_ref || github.ref_name }}
+
+      - name: Build WASM on PR branch
+        run: cargo build --release --target wasm32v1-none
+
+      - name: Record PR branch sizes
+        id: pr_sizes
+        run: |
+          set -euo pipefail
+          echo "sizes<<"EOF" >> "$GITHUB_OUTPUT"
+          for wasm in target/wasm32v1-none/release/*.wasm; do
+            name=$(basename "$wasm" .wasm)
+            bytes=$(stat -c%s "$wasm")
+            echo "${name}=${bytes}" >> "$GITHUB_OUTPUT"
+          done
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          clean: false
+          path: base-branch
+
+      - name: Build WASM on base branch
+        run: |
+          cp -r base-branch/. .
+          cargo build --release --target wasm32v1-none
+
+      - name: Compare sizes and post PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          MAX_INCREASE_PCT=${MAX_SIZE_INCREASE_PCT:-10}
+
+          table="| Contract | Base (bytes) | PR (bytes) | Delta | Status |\n|---|---|---|---|---|\n"
+          failed=false
+
+          # Read PR sizes from step output
+          declare -A pr_size_map
+          while IFS='=' read -r name bytes; do
+            pr_size_map["$name"]=$bytes
+          done < <(echo "${{ steps.pr_sizes.outputs.sizes }}" | grep -v '^sizes<<' | grep -v '^EOF$')
+
+          for wasm in target/wasm32v1-none/release/*.wasm; do
+            name=$(basename "$wasm" .wasm)
+            pr_bytes=$(stat -c%s "$wasm")
+
+            # Find matching base wasm
+            base_bytes=0
+            for base_wasm in base-branch/target/wasm32v1-none/release/*.wasm; do
+              base_name=$(basename "$base_wasm" .wasm)
+              if [ "$base_name" = "$name" ]; then
+                base_bytes=$(stat -c%s "$base_wasm")
+                break
+              fi
+            done
+
+            if [ "$base_bytes" -eq 0 ]; then
+              status="NEW"
+              delta="N/A"
+            else
+              delta=$((pr_bytes - base_bytes))
+              pct_increase=$(( delta * 100 / base_bytes ))
+              if [ "$pct_increase" -gt "$MAX_INCREASE_PCT" ]; then
+                status="FAIL (+${pct_increase}%)"
+                failed=true
+              else
+                status="OK (+${pct_increase}%)"
+              fi
+              delta="${delta} bytes"
+            fi
+
+            table+="| ${name} | ${base_bytes} | ${pr_bytes} | ${delta} | ${status} |\n"
+          done
+
+          comment="## WASM Size Regression Check\n\n${table}\nThreshold: max ${MAX_INCREASE_PCT}% increase per contract."
+
+          if [ "$failed" = true ]; then
+            comment+="\n\n**Some contracts exceed the size threshold.**"
+            gh pr comment ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --body "$(echo -e "$comment")"
+            exit 1
+          else
+            gh pr comment ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --body "$(echo -e "$comment")"
+          fi
 
   shellcheck:
     name: ShellCheck

@@ -49,4 +49,6 @@ pub enum Error {
     TooManyRefundRecipients = 26,
     /// Refund weights are invalid.
     InvalidRefundWeight = 27,
+    /// Nothing left in the distributor to refund. Issue #482.
+    NothingToRefund = 28,
 }

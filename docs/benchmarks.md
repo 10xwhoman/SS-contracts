@@ -10,7 +10,7 @@ This document publishes gas consumption and CPU instruction benchmarks for the c
 | :--- | :--- |
 | **Soroban SDK** | `soroban-sdk 22.0.0` |
 | **Rust Toolchain** | `1.80.0` (stable) |
-| **Target** | `wasm32-unknown-unknown` (release profile) |
+| **Target** | `wasm32v1-none` (release profile) |
 | **Network** | Stellar Testnet (Futurenet RPC) |
 | **Measurement** | `soroban contract invoke --cost` flag |
 
@@ -63,10 +63,10 @@ This document publishes gas consumption and CPU instruction benchmarks for the c
 
 ```bash
 # Build release WASM
-cargo build --release --target wasm32-unknown-unknown
+cargo build --release --target wasm32v1-none
 
 # Deploy to testnet
-soroban contract deploy --wasm target/wasm32-unknown-unknown/release/invoice_escrow.wasm --source admin --network testnet
+soroban contract deploy --wasm target/wasm32v1-none/release/invoice_escrow.wasm --source admin --network testnet
 
 # Invoke with cost measurement
 soroban contract invoke --id <CONTRACT_ID> --source admin --network testnet --cost -- initialize --admin <ADMIN>

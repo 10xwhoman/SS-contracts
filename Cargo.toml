@@ -1,17 +1,26 @@
 [workspace]
 resolver = "2"
 members = [
+    "contracts/categorisation-registry",
+    "contracts/fee-treasury",
     "contracts/invoice-escrow",
     "contracts/invoice-token",
+    "contracts/nonce-registry",
+    "contracts/order-book",
+    "contracts/partial-settlement",
     "contracts/payment-distributor",
     "contracts/referral",
     "contracts/reputation",
     "contracts/waitlist",
+    "contracts/invoice-registry",
+    "contracts/portfolio-snapshot",
+    "contracts/secondary-fee",
 ]
 
 [workspace.dependencies]
 soroban-sdk = "27.0.2"
 soroban-env-host = "27.0.2"
+proptest = "1"
 
 [profile.release]
 opt-level = "z"

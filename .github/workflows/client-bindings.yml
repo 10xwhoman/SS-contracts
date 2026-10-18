@@ -1,0 +1,56 @@
+name: Generate Contract Client Bindings
+
+on:
+  pull_request:
+    branches: [dev]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Build contracts and generate Rust / TypeScript clients
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust and WASM target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build contract WASM
+        run: cargo build --release --target wasm32v1-none
+
+      - name: Install Stellar CLI
+        run: cargo install stellar-cli --locked
+
+      - name: Generate bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="target/client-bindings"
+          mkdir -p "$target_dir/rust" "$target_dir/typescript"
+          for contract in invoice_escrow invoice_token payment_distributor; do
+            wasm="target/wasm32v1-none/release/${contract}.wasm"
+            test -s "$wasm"
+            stellar contract bindings rust --wasm "$wasm" > "$target_dir/rust/${contract}.rs"
+            stellar contract bindings typescript \
+              --wasm "$wasm" \
+              --output-dir "$target_dir/typescript/${contract}" \
+              --overwrite
+          done
+
+      - name: Upload generated client bindings
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-client-bindings
+          path: target/client-bindings/
+          if-no-files-found: error

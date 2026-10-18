@@ -47,12 +47,12 @@ assert_eq() {
 
 # ── 1. Build WASM ──────────────────────────────────────────────────────────────
 log "Building WASM targets..."
-cargo build --target wasm32-unknown-unknown --release \
+cargo build --target wasm32v1-none --release \
   -p invoice-escrow -p invoice-token -p payment-distributor
 
-ESCROW_WASM="target/wasm32-unknown-unknown/release/invoice_escrow.wasm"
-INV_TOKEN_WASM="target/wasm32-unknown-unknown/release/invoice_token.wasm"
-DISTRIBUTOR_WASM="target/wasm32-unknown-unknown/release/payment_distributor.wasm"
+ESCROW_WASM="target/wasm32v1-none/release/invoice_escrow.wasm"
+INV_TOKEN_WASM="target/wasm32v1-none/release/invoice_token.wasm"
+DISTRIBUTOR_WASM="target/wasm32v1-none/release/payment_distributor.wasm"
 
 # ── 2. Deploy contracts (skip if IDs supplied) ─────────────────────────────────
 deploy_contract() {

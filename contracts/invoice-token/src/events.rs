@@ -70,6 +70,13 @@ pub fn account_unfrozen_event(env: &Env, account: &Address) {
         .publish((Symbol::new(env, "account_unfrozen"),), account);
 }
 
+/// Emit a clawback event (SEP-41: regulatory compliance).
+/// Topics: ["clawback", from], Data: amount
+pub fn clawback_event(env: &Env, from: &Address, amount: i128) {
+    env.events()
+        .publish((Symbol::new(env, "clawback"), from), amount);
+}
+
 /// Emit an allowance expiration extension (topics ["allowance_extended", from, spender], data new_expiration_ledger).
 pub fn allowance_extended_event(
     env: &Env,

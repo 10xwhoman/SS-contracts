@@ -6,7 +6,7 @@ Step-by-step tutorial for building, deploying, and initializing the full Stellar
 
 ## Prerequisites
 
-- **Rust:** `1.80.0` or higher with `wasm32-unknown-unknown` target.
+- **Rust:** `1.80.0` or higher with `wasm32v1-none` target.
 - **Soroban CLI:** `v22.0.0` or higher (`cargo install --locked soroban-cli`).
 - **Account:** A funded Stellar keypair on Testnet (`soroban keys generate admin --network testnet`).
 
@@ -16,12 +16,12 @@ Step-by-step tutorial for building, deploying, and initializing the full Stellar
 
 ```bash
 # Compile release WASMs
-cargo build --release --target wasm32-unknown-unknown
+cargo build --release --target wasm32v1-none
 
 # Optimize WASM binaries (optional but recommended)
-soroban contract optimize --wasm target/wasm32-unknown-unknown/release/invoice_escrow.wasm
-soroban contract optimize --wasm target/wasm32-unknown-unknown/release/invoice_token.wasm
-soroban contract optimize --wasm target/wasm32-unknown-unknown/release/payment_distributor.wasm
+soroban contract optimize --wasm target/wasm32v1-none/release/invoice_escrow.wasm
+soroban contract optimize --wasm target/wasm32v1-none/release/invoice_token.wasm
+soroban contract optimize --wasm target/wasm32v1-none/release/payment_distributor.wasm
 ```
 
 ---
@@ -31,21 +31,21 @@ soroban contract optimize --wasm target/wasm32-unknown-unknown/release/payment_d
 ```bash
 # 1. Deploy Invoice Escrow
 ESCROW_ID=$(soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/invoice_escrow.wasm \
+  --wasm target/wasm32v1-none/release/invoice_escrow.wasm \
   --source admin \
   --network testnet)
 echo "Escrow Contract ID: $ESCROW_ID"
 
 # 2. Deploy Invoice Token
 TOKEN_ID=$(soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/invoice_token.wasm \
+  --wasm target/wasm32v1-none/release/invoice_token.wasm \
   --source admin \
   --network testnet)
 echo "Invoice Token Contract ID: $TOKEN_ID"
 
 # 3. Deploy Payment Distributor
 DISTRIBUTOR_ID=$(soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/payment_distributor.wasm \
+  --wasm target/wasm32v1-none/release/payment_distributor.wasm \
   --source admin \
   --network testnet)
 echo "Payment Distributor Contract ID: $DISTRIBUTOR_ID"

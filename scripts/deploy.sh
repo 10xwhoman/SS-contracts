@@ -83,9 +83,9 @@ fi
 : "${INVOICE_TOKEN_DECIMALS:? Set INVOICE_TOKEN_DECIMALS}"
 : "${INVOICE_TOKEN_INVOICE_ID:? Set INVOICE_TOKEN_INVOICE_ID}"
 
-WASM_INVOICE_ESCROW="${WASM_INVOICE_ESCROW:-target/wasm32-unknown-unknown/release/invoice_escrow.wasm}"
-WASM_INVOICE_TOKEN="${WASM_INVOICE_TOKEN:-target/wasm32-unknown-unknown/release/invoice_token.wasm}"
-WASM_PAYMENT_DISTRIBUTOR="${WASM_PAYMENT_DISTRIBUTOR:-target/wasm32-unknown-unknown/release/payment_distributor.wasm}"
+WASM_INVOICE_ESCROW="${WASM_INVOICE_ESCROW:-target/wasm32v1-none/release/invoice_escrow.wasm}"
+WASM_INVOICE_TOKEN="${WASM_INVOICE_TOKEN:-target/wasm32v1-none/release/invoice_token.wasm}"
+WASM_PAYMENT_DISTRIBUTOR="${WASM_PAYMENT_DISTRIBUTOR:-target/wasm32v1-none/release/payment_distributor.wasm}"
 
 # ---------------------------------------------------------------------------
 # Verify WASM artifacts exist

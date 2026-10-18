@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Tag, changelog & WASM artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: wasm32v1-none
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-wasm
+
+      - name: Compute next semver tag
+        id: version
+        run: |
+          set -euo pipefail
+          last_tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [[ -z "${last_tag}" ]]; then
+            next_tag="v0.1.0"
+            prev_tag=""
+          else
+            prev_tag="${last_tag}"
+            IFS='.' read -r major minor patch <<< "${last_tag#v}"
+            if [[ -z "${major:-}" || -z "${minor:-}" || -z "${patch:-}" ]]; then
+              next_tag="v$(date +%Y%m%d).0"
+            else
+              next_tag="v${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+          if git rev-parse -q --verify "refs/tags/${next_tag}" >/dev/null; then
+            next_tag="v$(date +%Y%m%d).0"
+          fi
+          echo "tag=${next_tag}" >> "$GITHUB_OUTPUT"
+          echo "prev=${prev_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          set -euo pipefail
+          prev="${{ steps.version.outputs.prev }}"
+          if [[ -n "${prev}" ]]; then
+            range="${prev}..HEAD"
+          else
+            range="HEAD"
+          fi
+          {
+            echo "notes<<CHANGELOG_EOF"
+            echo "## What's Changed"
+            echo ""
+            git log --no-merges --pretty='- %s (%h)' "${range}" || true
+            echo ""
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${prev}...${{ steps.version.outputs.tag }}"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and package WASM
+        run: |
+          set -euo pipefail
+          bash scripts/package-wasm.sh dist
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body: ${{ steps.changelog.outputs.notes }}
+          files: |
+            dist/*.wasm
+            dist/checksums.txt
+          fail_on_unmatched_files: true

@@ -21,3 +21,4 @@ This document catalogues all contract error codes, root cause failure conditions
 | 13 | `Overflow` | Checked math arithmetic overflow/underflow. | Verify transaction amounts fit within standard i128 range. |
 | 14 | `InvalidDueDate` | Due date timestamp is in the past or zero. | Provide Unix timestamp strictly greater than current ledger time. |
 | 15 | `InvalidPayer` | Payer address does not match authorized debtor. | Execute payment using debtor account. |
+| 54 | `InvalidInstallmentSchedule` | Installment schedule empty/too long, non-positive amount, non-increasing or out-of-range `due_ts`, sum ≠ `face_value`, wrong escrow status, or `paid_amt > 0`. | Configure `1..=64` installments summing to `face_value` with strictly increasing future `due_ts <= due_dt` before any repayment starts. |

@@ -578,6 +578,219 @@ fn test_mint_rejects_frozen_recipient() {
     assert_eq!(client.total_supply(), 0);
 }
 
+// ========== Clawback Tests (Issue #483: SEP-41 Regulatory Compliance) ==========
+
+#[test]
+fn test_clawback_requires_admin_auth() {
+    let env = Env::default();
+    let (client, _admin, minter) = setup_token(&env);
+    let account = Address::generate(&env);
+    
+    // Mint some tokens and freeze account
+    env.mock_all_auths();
+    client.mint(&account, &100, &minter);
+    client.freeze_account(&account);
+    env.mock_all_auths_allowing_non_root_auth();
+    
+    // Non-admin cannot clawback
+    let stranger = Address::generate(&env);
+    assert!(client.try_clawback(&account, &50).is_err());
+}
+
+#[test]
+fn test_clawback_only_works_on_frozen_accounts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+    let account = Address::generate(&env);
+    
+    client.mint(&account, &100, &minter);
+    
+    // Cannot clawback from unfrozen account
+    assert_eq!(
+        client.try_clawback(&account, &50),
+        Err(Ok(crate::errors::Error::AccountNotFrozen))
+    );
+    assert_eq!(client.balance(&account), 100);
+}
+
+#[test]
+fn test_clawback_full_balance_from_frozen_account() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+    let account = Address::generate(&env);
+    
+    client.mint(&account, &100, &minter);
+    client.freeze_account(&account);
+    
+    let supply_before = client.total_supply();
+    client.clawback(&account, &100);
+    
+    assert_eq!(client.balance(&account), 0);
+    assert_eq!(client.total_supply(), supply_before - 100);
+}
+
+#[test]
+fn test_clawback_partial_balance_from_frozen_account() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+    let account = Address::generate(&env);
+    
+    client.mint(&account, &100, &minter);
+    client.freeze_account(&account);
+    
+    let supply_before = client.total_supply();
+    client.clawback(&account, &60);
+    
+    assert_eq!(client.balance(&account), 40);
+    assert_eq!(client.total_supply(), supply_before - 60);
+    
+    // Can clawback again
+    client.clawback(&account, &40);
+    assert_eq!(client.balance(&account), 0);
+    assert_eq!(client.total_supply(), supply_before - 100);
+}
+
+#[test]
+fn test_clawback_insufficient_balance_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+    let account = Address::generate(&env);
+    
+    client.mint(&account, &100, &minter);
+    client.freeze_account(&account);
+    
+    assert_eq!(
+        client.try_clawback(&account, &150),
+        Err(Ok(crate::errors::Error::InsufficientBalance))
+    );
+    assert_eq!(client.balance(&account), 100);
+}
+
+#[test]
+fn test_clawback_zero_or_negative_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+    let account = Address::generate(&env);
+    
+    client.mint(&account, &100, &minter);
+    client.freeze_account(&account);
+    
+    assert_eq!(
+        client.try_clawback(&account, &0),
+        Err(Ok(crate::errors::Error::InvalidAmount))
+    );
+    assert_eq!(
+        client.try_clawback(&account, &-10),
+        Err(Ok(crate::errors::Error::InvalidAmount))
+    );
+    assert_eq!(client.balance(&account), 100);
+}
+
+#[test]
+fn test_clawback_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+    let account = Address::generate(&env);
+    
+    client.mint(&account, &100, &minter);
+    client.freeze_account(&account);
+    client.clawback(&account, &60);
+    
+    let clawback_event = env.events().all().events().last().unwrap().clone();
+    let (_contract_addr, topics, data) = parse_event(&env, &clawback_event);
+    
+    assert_eq!(
+        topics,
+        (Symbol::new(&env, "clawback"), account.clone()).into_val(&env)
+    );
+    let amount: i128 = data.try_into_val(&env).unwrap();
+    assert_eq!(amount, 60);
+}
+
+#[test]
+fn test_clawback_multiple_frozen_accounts_independence() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+    let account1 = Address::generate(&env);
+    let account2 = Address::generate(&env);
+    
+    client.mint(&account1, &100, &minter);
+    client.mint(&account2, &200, &minter);
+    client.freeze_account(&account1);
+    client.freeze_account(&account2);
+    
+    let supply_before = client.total_supply();
+    
+    client.clawback(&account1, &50);
+    assert_eq!(client.balance(&account1), 50);
+    assert_eq!(client.balance(&account2), 200);
+    assert_eq!(client.total_supply(), supply_before - 50);
+    
+    client.clawback(&account2, &100);
+    assert_eq!(client.balance(&account1), 50);
+    assert_eq!(client.balance(&account2), 100);
+    assert_eq!(client.total_supply(), supply_before - 150);
+}
+
+#[test]
+fn test_clawback_then_unfreeze_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, minter) = setup_token(&env);
+    let account = Address::generate(&env);
+    
+    client.mint(&account, &100, &minter);
+    client.freeze_account(&account);
+    client.clawback(&account, &60);
+    
+    assert_eq!(client.balance(&account), 40);
+    
+    // Unfreeze and verify account can transact again
+    client.unfreeze_account(&account);
+    client.set_transfer_locked(&admin, &false);
+    
+    let recipient = Address::generate(&env);
+    client.transfer(&account, &recipient, &20);
+    
+    assert_eq!(client.balance(&account), 20);
+    assert_eq!(client.balance(&recipient), 20);
+}
+
+#[test]
+fn test_clawback_conserves_supply_invariant() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+    
+    let account1 = Address::generate(&env);
+    let account2 = Address::generate(&env);
+    let account3 = Address::generate(&env);
+    
+    client.mint(&account1, &100, &minter);
+    client.mint(&account2, &200, &minter);
+    client.mint(&account3, &300, &minter);
+    
+    let initial_supply = client.total_supply();
+    assert_eq!(initial_supply, 600);
+    
+    client.freeze_account(&account2);
+    client.clawback(&account2, &150);
+    
+    // Supply should decrease by clawback amount
+    assert_eq!(client.total_supply(), initial_supply - 150);
+    assert_eq!(
+        client.balance(&account1) + client.balance(&account2) + client.balance(&account3),
+        client.total_supply()
+    );
+}
+
 #[test]
 fn test_transfer_locked_with_sufficient_balance() {
     let env = Env::default();
@@ -2525,4 +2738,624 @@ fn test_pause_unpause_event_emission() {
     let (old_val, new_val): (bool, bool) = data.try_into_val(&env).unwrap();
     assert_eq!(old_val, true);
     assert_eq!(new_val, false);
+}
+
+// ── Invoice mint uniqueness, authorization, and identifier encoding ──────────
+
+/// First mint for an invoice token succeeds; re-initialize (second series) is
+/// rejected with no further mint events or supply growth.
+#[test]
+fn test_duplicate_mint_series_rejected_for_same_invoice() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(InvoiceToken, ());
+    let client = InvoiceTokenClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let name = SorobanString::from_str(&env, "Invoice INV-DUP");
+    let symbol = SorobanString::from_str(&env, "INVDUP");
+    let invoice_id = Symbol::new(&env, "inv_dup");
+
+    client.initialize(&admin, &name, &symbol, &7u32, &invoice_id, &minter);
+
+    let mint_amount: i128 = 1_000;
+    client.mint(&recipient, &mint_amount, &minter);
+
+    // Inspect mint event immediately (subsequent view calls can advance the
+    // recorded event cursor in the test host).
+    let events_after_mint = env.events().all();
+    let mint_event = events_after_mint.events().last().unwrap();
+    let (_addr, topics, data) = parse_event(&env, mint_event);
+    assert_eq!(
+        topics,
+        (Symbol::new(&env, "mint"), recipient.clone()).into_val(&env)
+    );
+    let emitted: i128 = data.try_into_val(&env).unwrap();
+    assert_eq!(emitted, mint_amount);
+    let mint_event_count = events_after_mint.events().len();
+    assert_eq!(
+        mint_event_count, 1,
+        "exactly one mint event for the invoice"
+    );
+
+    assert_eq!(client.balance(&recipient), mint_amount);
+    assert_eq!(client.total_supply(), mint_amount);
+    assert_eq!(client.invoice_id(), invoice_id);
+
+    // Repeated initialize with the same invoice id cannot create another series.
+    let dup_init = client.try_initialize(&admin, &name, &symbol, &7u32, &invoice_id, &minter);
+    assert_eq!(dup_init, Err(Ok(crate::errors::Error::AlreadyInit)));
+
+    assert_eq!(client.balance(&recipient), mint_amount);
+    assert_eq!(client.total_supply(), mint_amount);
+    assert_eq!(client.invoice_id(), invoice_id);
+}
+
+/// Authorized minter creates the expected token record; unauthorized and
+/// invalid invoice metadata paths are rejected.
+#[test]
+fn test_authorized_mint_and_invalid_invoice_metadata() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(InvoiceToken, ());
+    let client = InvoiceTokenClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let name = SorobanString::from_str(&env, "Invoice AUTH");
+    let symbol = SorobanString::from_str(&env, "AUTH");
+    let invoice_id = Symbol::new(&env, "inv_auth");
+
+    // Empty name rejected before any token record exists.
+    let empty_name = SorobanString::from_str(&env, "");
+    assert_eq!(
+        client.try_initialize(&admin, &empty_name, &symbol, &7u32, &invoice_id, &minter),
+        Err(Ok(crate::errors::Error::InvalidMetadata))
+    );
+
+    // Empty symbol rejected.
+    let empty_symbol = SorobanString::from_str(&env, "");
+    assert_eq!(
+        client.try_initialize(&admin, &name, &empty_symbol, &7u32, &invoice_id, &minter),
+        Err(Ok(crate::errors::Error::InvalidMetadata))
+    );
+
+    // Valid initialize + authorized mint.
+    client.initialize(&admin, &name, &symbol, &7u32, &invoice_id, &minter);
+    client.mint(&recipient, &250, &minter);
+    assert_eq!(client.balance(&recipient), 250);
+    assert_eq!(client.total_supply(), 250);
+    assert_eq!(client.invoice_id(), invoice_id);
+    assert_eq!(client.name(), name);
+    assert_eq!(client.symbol(), symbol);
+
+    // Unauthorized caller rejected; balances/supply unchanged.
+    let unauthorized = client.try_mint(&recipient, &50, &stranger);
+    assert_eq!(unauthorized, Err(Ok(crate::errors::Error::Unauthorized)));
+    assert_eq!(client.balance(&recipient), 250);
+    assert_eq!(client.total_supply(), 250);
+
+    // Duplicate initialize (same invoice id on same contract) rejected.
+    assert_eq!(
+        client.try_initialize(&admin, &name, &symbol, &7u32, &invoice_id, &minter),
+        Err(Ok(crate::errors::Error::AlreadyInit))
+    );
+    assert_eq!(client.invoice_id(), invoice_id);
+    assert_eq!(client.total_supply(), 250);
+}
+
+/// Invoice identifiers and metadata round-trip through storage without loss;
+/// stored metadata matches what initialize recorded for event consumers.
+#[test]
+fn test_invoice_identifier_and_metadata_encoding() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Short identifier
+    {
+        let contract_id = env.register(InvoiceToken, ());
+        let client = InvoiceTokenClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let short_id = Symbol::new(&env, "a");
+        let name = SorobanString::from_str(&env, "Short Inv");
+        let symbol = SorobanString::from_str(&env, "S");
+        client.initialize(&admin, &name, &symbol, &7u32, &short_id, &minter);
+        assert_eq!(client.invoice_id(), short_id);
+        assert_eq!(client.name(), name);
+        assert_eq!(client.symbol(), symbol);
+        assert_eq!(client.decimals(), 7);
+    }
+
+    // Maximum-length Symbol (32 chars) — boundary for Soroban Symbol encoding
+    {
+        let contract_id = env.register(InvoiceToken, ());
+        let client = InvoiceTokenClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let max_id = Symbol::new(&env, "abcdefghijklmnopqrstuvwxyz012345");
+        let name = SorobanString::from_str(&env, "Max Length Invoice Identifier");
+        let symbol = SorobanString::from_str(&env, "MAX32");
+        client.initialize(&admin, &name, &symbol, &0u32, &max_id, &minter);
+        assert_eq!(client.invoice_id(), max_id);
+        assert_eq!(client.name(), name);
+        assert_eq!(client.symbol(), symbol);
+        assert_eq!(client.decimals(), 0);
+
+        // Mint and confirm event payload encoding is independent of invoice_id
+        // while invoice_id remains the stored metadata key for consumers.
+        let recipient = Address::generate(&env);
+        client.mint(&recipient, &42, &minter);
+        let events = env.events().all();
+        let event = events.events().last().unwrap();
+        let (_addr, topics, data) = parse_event(&env, event);
+        assert_eq!(
+            topics,
+            (Symbol::new(&env, "mint"), recipient.clone()).into_val(&env)
+        );
+        let emitted: i128 = data.try_into_val(&env).unwrap();
+        assert_eq!(emitted, 42);
+        assert_eq!(client.invoice_id(), max_id);
+    }
+
+    // Near-max boundary (31 chars) still round-trips
+    {
+        let contract_id = env.register(InvoiceToken, ());
+        let client = InvoiceTokenClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let near_max = Symbol::new(&env, "abcdefghijklmnopqrstuvwxyz01234");
+        let name = SorobanString::from_str(&env, "Near Max");
+        let symbol = SorobanString::from_str(&env, "NMAX");
+        client.initialize(&admin, &name, &symbol, &18u32, &near_max, &minter);
+        assert_eq!(client.invoice_id(), near_max);
+        assert_eq!(client.decimals(), 18);
+    }
+}
+
+// ========== #387: Dedicated Error Branch Tests ==========
+
+#[test]
+fn test_mint_unauthorized_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _minter) = setup_token(&env);
+
+    let recipient = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    let result = client.try_mint(&recipient, &100, &stranger);
+    assert_eq!(result, Err(Ok(crate::errors::Error::Unauthorized)));
+    assert_eq!(client.balance(&recipient), 0);
+    assert_eq!(client.total_supply(), 0);
+}
+
+#[test]
+fn test_mint_negative_amount_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+
+    let recipient = Address::generate(&env);
+    let result = client.try_mint(&recipient, &(-1i128), &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::InvalidAmount)));
+    assert_eq!(client.balance(&recipient), 0);
+    assert_eq!(client.total_supply(), 0);
+}
+
+#[test]
+fn test_mint_zero_amount_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+
+    let recipient = Address::generate(&env);
+    let result = client.try_mint(&recipient, &0, &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::InvalidAmount)));
+    assert_eq!(client.balance(&recipient), 0);
+    assert_eq!(client.total_supply(), 0);
+}
+
+#[test]
+fn test_mint_paused_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, minter) = setup_token(&env);
+
+    client.set_paused(&true);
+    let recipient = Address::generate(&env);
+    let result = client.try_mint(&recipient, &100, &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::Paused)));
+    assert_eq!(client.balance(&recipient), 0);
+    assert_eq!(client.total_supply(), 0);
+}
+
+#[test]
+fn test_mint_batch_unauthorized_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _minter) = setup_token(&env);
+
+    let recipients = soroban_sdk::vec![&env, Address::generate(&env)];
+    let amounts = soroban_sdk::vec![&env, 100i128];
+    let stranger = Address::generate(&env);
+
+    let result = client.try_mint_batch(&recipients, &amounts, &stranger);
+    assert_eq!(result, Err(Ok(crate::errors::Error::Unauthorized)));
+    assert_eq!(client.total_supply(), 0);
+}
+
+#[test]
+fn test_mint_batch_negative_amount_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+
+    let recipients = soroban_sdk::vec![&env, Address::generate(&env)];
+    let amounts = soroban_sdk::vec![&env, -1i128];
+
+    let result = client.try_mint_batch(&recipients, &amounts, &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::InvalidAmount)));
+    assert_eq!(client.total_supply(), 0);
+}
+
+#[test]
+fn test_mint_batch_paused_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, minter) = setup_token(&env);
+
+    client.set_paused(&true);
+    let recipients = soroban_sdk::vec![&env, Address::generate(&env)];
+    let amounts = soroban_sdk::vec![&env, 100i128];
+
+    let result = client.try_mint_batch(&recipients, &amounts, &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::Paused)));
+    assert_eq!(client.total_supply(), 0);
+}
+
+#[test]
+fn test_mint_batch_length_mismatch_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+
+    let recipients = soroban_sdk::vec![&env, Address::generate(&env), Address::generate(&env)];
+    let amounts = soroban_sdk::vec![&env, 100i128];
+
+    let result = client.try_mint_batch(&recipients, &amounts, &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::BatchLengthMismatch)));
+    assert_eq!(client.total_supply(), 0);
+}
+
+#[test]
+fn test_transfer_from_locked_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+
+    let sender = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&sender, &1000, &minter);
+    let expiration = env.ledger().sequence() + 100;
+    client.approve(&sender, &spender, &500, &expiration);
+
+    assert!(client.transfer_locked());
+    let result = client.try_transfer_from(&spender, &sender, &recipient, &100);
+    assert_eq!(result, Err(Ok(crate::errors::Error::TransferLocked)));
+    assert_eq!(client.balance(&sender), 1000);
+    assert_eq!(client.balance(&recipient), 0);
+}
+
+#[test]
+fn test_mint_overflow_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+
+    let recipient = Address::generate(&env);
+    let max = i128::MAX;
+
+    client.mint(&recipient, &max, &minter);
+    assert_eq!(client.balance(&recipient), max);
+
+    let result = client.try_mint(&recipient, &1, &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::Overflow)));
+    assert_eq!(client.balance(&recipient), max);
+}
+
+#[test]
+fn test_mint_zero_amount_rejected() {
+    let env = Env::default();
+    let (client, admin, minter) = setup_token(&env);
+    let recipient = Address::generate(&env);
+
+    let result = client.try_mint(&recipient, &0, &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::InvalidAmount)));
+}
+
+#[test]
+fn test_mint_negative_amount_rejected() {
+    let env = Env::default();
+    let (client, admin, minter) = setup_token(&env);
+    let recipient = Address::generate(&env);
+
+    let result = client.try_mint(&recipient, &(-100), &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::InvalidAmount)));
+}
+
+#[test]
+fn test_mint_fractional_decimal_bounds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(InvoiceToken, ());
+    let client = InvoiceTokenClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    let name = SorobanString::from_str(&env, "Invoice");
+    let symbol = SorobanString::from_str(&env, "INV");
+    let invoice_id = Symbol::new(&env, "inv_001");
+
+    client.initialize(&admin, &name, &symbol, &7u32, &invoice_id, &minter);
+
+    let recipient = Address::generate(&env);
+    client.mint(&recipient, &1, &minter);
+    assert_eq!(client.balance(&recipient), 1);
+
+    client.mint(&recipient, &9_999_999, &minter);
+    assert_eq!(client.balance(&recipient), 10_000_000);
+}
+
+#[test]
+fn test_mint_max_supply_overflow_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, minter) = setup_token(&env);
+    let recipient = Address::generate(&env);
+
+    let max_i128 = i128::MAX;
+    client.mint(&recipient, &max_i128, &minter);
+
+    let result = client.try_mint(&recipient, &1, &minter);
+    assert_eq!(result, Err(Ok(crate::errors::Error::Overflow)));
+}
+
+#[test]
+fn test_persistent_storage_ttl_extension() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, minter) = setup_token(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&recipient, &1000, &minter);
+
+    env.ledger().with_mut(|li| li.sequence_number += 100_000);
+
+    let balance = client.balance(&recipient);
+    assert_eq!(balance, 1000);
+}
+
+#[test]
+fn test_storage_key_ttl_after_multiple_operations() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, minter) = setup_token(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&recipient, &1000, &minter);
+
+    env.ledger().with_mut(|li| li.sequence_number += 50_000);
+
+    let other = Address::generate(&env);
+    client.approve(&recipient, &other, &500, &200_000);
+
+    env.ledger().with_mut(|li| li.sequence_number += 50_000);
+
+    let allowance = client.allowance(&recipient, &other);
+    assert_eq!(allowance, 500);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue #457: property-based tests for fractional balance conservation.
+// Invariant: for any sequence of splits/moves/burns, the sum of fractional
+// balances plus burned supply equals minted supply at every step.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Small deterministic LCG so failures are reproducible (no rand dep).
+fn lcg_next(state: &mut u64) -> u64 {
+    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state >> 33
+}
+
+fn lcg_amount(state: &mut u64, max: i128) -> i128 {
+    1 + (lcg_next(state) as i128) % max
+}
+
+fn issue457_sum_balances(client: &InvoiceTokenClient, wallets: &soroban_sdk::Vec<Address>) -> i128 {
+    let mut sum: i128 = 0;
+    for w in wallets.iter() {
+        sum += client.balance(&w);
+    }
+    sum
+}
+
+#[test]
+fn issue457_mint_split_conserves_total_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, minter) = setup_token(&env);
+
+    // Deterministic PRNG sweep: split 1_000_007 into 6 pseudo-random parts.
+    let mut state: u64 = 0x4557;
+    let mut wallets = soroban_sdk::vec![&env];
+    for _ in 0..6 {
+        wallets.push_back(Address::generate(&env));
+    }
+    let mut remaining: i128 = 1_000_007;
+    let mut minted: i128 = 0;
+    for i in 0..6 {
+        let part = if i == 5 { remaining } else { lcg_amount(&mut state, remaining / 3).min(remaining - (5 - i as i128)) };
+        client.mint(&wallets.get(i).unwrap(), &part, &minter);
+        minted += part;
+        remaining -= part;
+    }
+    assert_eq!(remaining, 0);
+    assert_eq!(client.total_supply(), minted);
+    assert_eq!(issue457_sum_balances(&client, &wallets), minted);
+    assert_eq!(client.balance(&admin), 0);
+}
+
+#[test]
+fn issue457_arbitrary_split_tree_conserves_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+
+    // Depth-3 binary split: each node forwards all it holds to two children
+    // with pseudo-random fractional shares; the leaf sum must equal the root.
+    let mut state: u64 = 0xBEEF;
+    let root = Address::generate(&env);
+    client.mint(&root, &9_999_983, &minter);
+    client.set_transfer_locked(&_admin, &false);
+
+    let mut frontier: soroban_sdk::Vec<Address> = soroban_sdk::vec![&env, root.clone()];
+    for _depth in 0..3 {
+        let mut next: soroban_sdk::Vec<Address> = soroban_sdk::vec![&env];
+        for node in frontier.iter() {
+            let bal = client.balance(&node);
+            let left = Address::generate(&env);
+            let right = Address::generate(&env);
+            if bal >= 2 {
+                let l_amt = 1 + (lcg_next(&mut state) as i128) % (bal - 1);
+                let r_amt = bal - l_amt;
+                if l_amt > 0 {
+                    client.transfer(&node, &left, &l_amt);
+                }
+                if r_amt > 0 {
+                    client.transfer(&node, &right, &r_amt);
+                }
+            }
+            next.push_back(left);
+            next.push_back(right);
+        }
+        frontier = next;
+    }
+    let mut leaf_sum: i128 = 0;
+    for node in frontier.iter() {
+        leaf_sum += client.balance(&node);
+    }
+    assert_eq!(leaf_sum, 9_999_983i128);
+}
+
+#[test]
+fn issue457_transfers_with_fee_conserve_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, minter) = setup_token(&env);
+    client.set_transfer_locked(&admin, &false);
+
+    // A nonzero transfer fee moves value to the fee recipient; it must not
+    // create or destroy supply. Sweep fee rates across the valid range.
+    let mut state: u64 = 0xFEED;
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let supply: i128 = 50_000_009;
+    client.mint(&alice, &supply, &minter);
+
+    for fee_bps in [1i128, 13, 250, 1_000, 5_000, 9_999, 10_000] {
+        client.set_fee_bps(&admin, &fee_bps);
+        let amt = lcg_amount(&mut state, supply / 20);
+        client.transfer(&alice, &bob, &amt);
+        let total = client.balance(&alice)
+            + client.balance(&bob)
+            + client.balance(&admin);
+        assert_eq!(total, supply, "conservation broke at fee_bps={}", fee_bps);
+        assert_eq!(client.total_supply(), supply);
+    }
+}
+
+#[test]
+fn issue457_burn_reduces_supply_and_conserves_identity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, minter) = setup_token(&env);
+
+    let mut state: u64 = 0xACDC;
+    let mut wallets = soroban_sdk::vec![&env];
+    for _ in 0..4 {
+        wallets.push_back(Address::generate(&env));
+    }
+    let mut minted: i128 = 0;
+    for w in wallets.iter() {
+        let amt = lcg_amount(&mut state, 100_000);
+        client.mint(&w, &amt, &minter);
+        minted += amt;
+    }
+    assert_eq!(client.total_supply(), minted);
+
+    // Burn a pseudo-random slice from each wallet; supply must track exactly.
+    let mut burned: i128 = 0;
+    for w in wallets.iter() {
+        let bal = client.balance(&w);
+        let burn = 1 + (lcg_next(&mut state) as i128) % bal;
+        client.burn(&w, &burn);
+        burned += burn;
+        assert_eq!(client.total_supply(), minted - burned);
+    }
+    assert_eq!(issue457_sum_balances(&client, &wallets), minted - burned);
+}
+
+#[test]
+fn issue457_random_walk_mint_transfer_burn_conserves_every_step() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, minter) = setup_token(&env);
+    client.set_transfer_locked(&admin, &false);
+
+    // 60-step deterministic random walk over mint/transfer/burn; the
+    // conservation identity must hold after every single step.
+    let mut state: u64 = 0x5EED_0001;
+    let mut wallets = soroban_sdk::vec![&env];
+    for _ in 0..5 {
+        wallets.push_back(Address::generate(&env));
+    }
+    let mut minted: i128 = 0;
+    let mut burned: i128 = 0;
+
+    for step in 0..60u64 {
+        let wi = (lcg_next(&mut state) % 5) as usize;
+        let w = &wallets.get(wi as u32).unwrap();
+        let bal = client.balance(&w);
+        match lcg_next(&mut state) % 3 {
+            0 => {
+                let amt = lcg_amount(&mut state, 50_000);
+                client.mint(&w, &amt, &minter);
+                minted += amt;
+            }
+            1 if bal >= 2 => {
+                let mut ti = (lcg_next(&mut state) % 5) as usize;
+                if ti == wi {
+                    ti = (ti + 1) % 5;
+                }
+                let to = &wallets.get(ti as u32).unwrap();
+                let amt = 1 + (lcg_next(&mut state) as i128) % (bal - 1);
+                client.transfer(w, to, &amt);
+            }
+            _ if bal >= 1 => {
+                let burn = 1 + (lcg_next(&mut state) as i128) % bal;
+                client.burn(&w, &burn);
+                burned += burn;
+            }
+            _ => {}
+        }
+        let held = issue457_sum_balances(&client, &wallets);
+        assert_eq!(held, minted - burned, "step {}", step);
+        assert_eq!(client.total_supply(), minted - burned, "step {}", step);
+    }
 }

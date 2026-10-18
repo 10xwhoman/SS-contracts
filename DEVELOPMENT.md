@@ -21,8 +21,11 @@ cargo test --all --verbose
 # 4. Audit dependency vulnerabilities against the RustSec advisory database
 cargo audit
 
-# 5. Build release WASM binaries for target wasm32-unknown-unknown
-cargo build --release --target wasm32-unknown-unknown
+# 5. Build release WASM binaries for the target in rust-toolchain.toml (wasm32v1-none)
+cargo build --release --target wasm32v1-none
+
+# 6. Verify rust-toolchain.toml stays in sync with CI workflows and scripts
+bash scripts/check-toolchain-sync.sh
 ```
 
 ---
@@ -43,7 +46,7 @@ Run `cargo install cargo-audit --locked` once locally if the `cargo audit` comma
 ## 🛠️ Local Development Setup
 
 ### 1. Requirements
-- Rust stable toolchain (`1.80+`) with target `wasm32-unknown-unknown`
+- Rust stable toolchain (`1.80+`) with target `wasm32v1-none` (see `rust-toolchain.toml`)
 - Stellar CLI / Soroban CLI (`stellar-cli` / `soroban-cli` pinned to `22.0.0`)
 - `cargo-tarpaulin` (optional, for code coverage reports)
 

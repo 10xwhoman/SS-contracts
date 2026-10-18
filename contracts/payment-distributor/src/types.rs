@@ -13,7 +13,8 @@ pub enum StorageKey {
     InvestorBonusBps,
     /// Fee recipient address for platform fees (Issue #122).
     FeeRecipient,
-    /// Re-entrancy guard flag for distribution entrypoints (Issue #127).
+    /// Temporary: re-entrancy guard flag for distribution entrypoints. Only
+    /// needs to be readable within a single invocation. (Issue #127, #492)
     Locked,
     /// Whitelisted escrow contract address allowed to call distribute_payment (Issue #121).
     EscrowContract,

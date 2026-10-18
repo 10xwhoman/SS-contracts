@@ -93,9 +93,9 @@ $InvoiceTokenSymbol        = Require-Env 'INVOICE_TOKEN_SYMBOL'       'Ticker sy
 $InvoiceTokenDecimals      = Require-Env 'INVOICE_TOKEN_DECIMALS'     'Decimal places (e.g. 7)'
 $InvoiceTokenInvoiceId     = Require-Env 'INVOICE_TOKEN_INVOICE_ID'   'Invoice identifier (Soroban Symbol)'
 
-$WasmInvoiceEscrow         = Get-EnvOrDefault 'WASM_INVOICE_ESCROW'         'target/wasm32-unknown-unknown/release/invoice_escrow.wasm'
-$WasmInvoiceToken          = Get-EnvOrDefault 'WASM_INVOICE_TOKEN'          'target/wasm32-unknown-unknown/release/invoice_token.wasm'
-$WasmPaymentDistributor    = Get-EnvOrDefault 'WASM_PAYMENT_DISTRIBUTOR'    'target/wasm32-unknown-unknown/release/payment_distributor.wasm'
+$WasmInvoiceEscrow         = Get-EnvOrDefault 'WASM_INVOICE_ESCROW'         'target/wasm32v1-none/release/invoice_escrow.wasm'
+$WasmInvoiceToken          = Get-EnvOrDefault 'WASM_INVOICE_TOKEN'          'target/wasm32v1-none/release/invoice_token.wasm'
+$WasmPaymentDistributor    = Get-EnvOrDefault 'WASM_PAYMENT_DISTRIBUTOR'    'target/wasm32v1-none/release/payment_distributor.wasm'
 
 $ExistingEscrowId           = Get-EnvOrDefault 'INVOICE_ESCROW_CONTRACT_ID'     ''
 $ExistingTokenId            = Get-EnvOrDefault 'INVOICE_TOKEN_CONTRACT_ID'      ''

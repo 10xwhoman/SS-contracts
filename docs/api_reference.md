@@ -43,6 +43,21 @@ pub fn fund_escrow(env: Env, invoice_id: Symbol, investor: Address, amount: i128
 - **Auth:** Requires `investor` authorization.
 - **Errors:** `EscrowNotFound` (code 4), `EscrowAlreadyFunded` (code 5).
 
+### `set_installment_schedule`
+Configures the partial installment settlement milestone schedule for an invoice.
+
+```rust
+pub fn set_installment_schedule(
+    env: Env,
+    invoice_id: Symbol,
+    seller: Address,
+    schedule: Vec<InstallmentInput>,
+);
+```
+- **Auth:** Requires `seller` authorization (must be the escrow's seller).
+- **Preconditions:** Escrow `Created`/`Funded` with `paid_amt == 0`; `1..=64` entries; amounts `> 0` and summing to `face_value`; strictly increasing `due_ts` in `(now, due_dt]`.
+- **Errors:** `InvalidInstallmentSchedule` (code 54), `Unauthorized` (code 3), `EscrowNotFound` (code 6), `Paused` (code 15).
+
 ---
 
 ## References

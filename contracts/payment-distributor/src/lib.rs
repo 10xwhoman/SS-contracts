@@ -1,5 +1,7 @@
 #![no_std]
 
+extern crate alloc;
+
 mod errors;
 mod events;
 mod storage;
@@ -79,6 +81,22 @@ fn parse_fee_bps(fee_bps: i128) -> Result<u32, Error> {
     Ok(fee_bps_u32)
 }
 
+/// Select the appropriate fee tier based on payment volume.
+/// Returns the fee_bps for the tier that matches the payment amount.
+/// If no tiers are configured or amount doesn't match any tier, returns the default fee.
+fn select_fee_tier(env: &Env, payment_amount: i128, default_fee_bps: u32) -> u32 {
+    if let Some(tiers) = storage::get_fee_tiers(env) {
+        for tier in tiers.iter() {
+            if payment_amount >= tier.min_amount
+                && (tier.max_amount == 0 || payment_amount <= tier.max_amount)
+            {
+                return tier.fee_bps;
+            }
+        }
+    }
+    default_fee_bps
+}
+
 fn compute_split(
     paid_amount: i128,
     already_distributed: i128,
@@ -119,6 +137,78 @@ fn compute_split(
     })
 }
 
+/// Calculate proportional refund shares with integer remainder assigned to the
+/// final recipient. Kept pure so property tests exercise the same code path as
+/// on-chain distribution.
+fn pro_rata_shares(refund_amount: i128, weights: &[i128]) -> Result<alloc::vec::Vec<i128>, Error> {
+    if refund_amount <= 0 || weights.is_empty() || weights.iter().any(|weight| *weight < 0) {
+        return Err(Error::InvalidRefundWeight);
+    }
+    let total_weight = weights.iter().try_fold(0i128, |sum, weight| {
+        sum.checked_add(*weight).ok_or(Error::Overflow)
+    })?;
+    if total_weight <= 0 {
+        return Err(Error::InvalidRefundWeight);
+    }
+    let mut allocated = 0i128;
+    let mut shares = alloc::vec::Vec::with_capacity(weights.len());
+    for (index, weight) in weights.iter().enumerate() {
+        let share = if index + 1 == weights.len() {
+            refund_amount
+                .checked_sub(allocated)
+                .ok_or(Error::Overflow)?
+        } else {
+            refund_amount
+                .checked_mul(*weight)
+                .ok_or(Error::Overflow)?
+                .checked_div(total_weight)
+                .ok_or(Error::Overflow)?
+        };
+        if share < 0 {
+            return Err(Error::InvalidRefundWeight);
+        }
+        allocated = allocated.checked_add(share).ok_or(Error::Overflow)?;
+        shares.push(share);
+    }
+    Ok(shares)
+}
+
+fn fee_split_amounts(
+    amount: i128,
+    shares_bps: &[u32],
+    referral_bps: u32,
+) -> Result<(i128, alloc::vec::Vec<i128>), Error> {
+    if amount <= 0 || shares_bps.is_empty() || referral_bps > MAX_FEE_BPS {
+        return Err(Error::InvalidSplit);
+    }
+    let referral = amount
+        .checked_mul(referral_bps as i128)
+        .ok_or(Error::Overflow)?
+        .checked_div(10_000)
+        .ok_or(Error::Overflow)?;
+    let mut allocated = referral;
+    let mut recipients = alloc::vec::Vec::with_capacity(shares_bps.len());
+    for (index, share_bps) in shares_bps.iter().enumerate() {
+        let share = if index == 0 {
+            0 // Filled with the exact residual after the other shares.
+        } else {
+            amount
+                .checked_mul(*share_bps as i128)
+                .ok_or(Error::Overflow)?
+                .checked_div(10_000)
+                .ok_or(Error::Overflow)?
+        };
+        allocated = allocated.checked_add(share).ok_or(Error::Overflow)?;
+        recipients.push(share);
+    }
+    let primary = amount.checked_sub(allocated).ok_or(Error::Overflow)?;
+    if primary < 0 {
+        return Err(Error::InvalidSplit);
+    }
+    recipients[0] = primary;
+    Ok((referral, recipients))
+}
+
 /// Issue #126 / #130: Distribute a single asset `amount` across `split`, taking the
 /// optional referral cut off the top and allocating any rounding remainder to the
 /// primary (index 0) recipient so the full amount is distributed with no dust.
@@ -136,41 +226,13 @@ fn distribute_split(
 
     let token_client = token::Client::new(env, token);
 
-    // Referral cut off the top.
-    let referral_amount = if split.referral_bps > 0 {
-        amount
-            .checked_mul(split.referral_bps as i128)
-            .ok_or(Error::Overflow)?
-            .checked_div(10_000)
-            .ok_or(Error::Overflow)?
-    } else {
-        0
-    };
-
-    // Compute recipient amounts: recipients[1..] by their basis-point share and
-    // recipients[0] as the exact residual so the total equals `amount`.
-    let n = split.recipients.len();
-    let mut allocated = referral_amount;
+    let share_bps: alloc::vec::Vec<u32> = split.shares_bps.iter().collect();
+    let (referral_amount, allocated) = fee_split_amounts(amount, &share_bps, split.referral_bps)?;
     let mut rec_amounts: Vec<i128> = Vec::new(env);
-    for i in 0..n {
-        if i == 0 {
-            rec_amounts.push_back(0); // residual placeholder, set below
-        } else {
-            let share = split.shares_bps.get(i).ok_or(Error::InvalidSplit)?;
-            let amt = amount
-                .checked_mul(share as i128)
-                .ok_or(Error::Overflow)?
-                .checked_div(10_000)
-                .ok_or(Error::Overflow)?;
-            allocated = allocated.checked_add(amt).ok_or(Error::Overflow)?;
-            rec_amounts.push_back(amt);
-        }
+    for amount in allocated {
+        rec_amounts.push_back(amount);
     }
-    let primary = amount.checked_sub(allocated).ok_or(Error::Overflow)?;
-    if primary < 0 {
-        return Err(Error::InvalidSplit);
-    }
-    rec_amounts.set(0, primary);
+    let n = split.recipients.len();
 
     let mut recipients_out: Vec<Address> = Vec::new(env);
     let mut amounts_out: Vec<i128> = Vec::new(env);
@@ -261,11 +323,17 @@ impl PaymentDistributor {
         let token = addresses.get(0).ok_or(Error::InvalidAmount)?;
         let seller = addresses.get(1).ok_or(Error::InvalidAmount)?;
         let funder = addresses.get(2).ok_or(Error::InvalidAmount)?;
-        let fee_bps_u32 = parse_fee_bps(amounts.get(3).ok_or(Error::InvalidAmount)?)?;
+        let default_fee_bps = parse_fee_bps(amounts.get(3).ok_or(Error::InvalidAmount)?)?;
 
         let paid_amount = amounts.get(0).ok_or(Error::InvalidAmount)?;
         let investor_amount = amounts.get(2).ok_or(Error::InvalidAmount)?;
         let mut state = get_distribution_state(&env, &escrow_contract, &invoice_id);
+
+        // Issue #448: Select fee tier based on payment volume for tiered fee schedule
+        let payment_volume = paid_amount
+            .checked_sub(state.paid_distributed)
+            .ok_or(Error::InvalidAmount)?;
+        let fee_bps_u32 = select_fee_tier(&env, payment_volume, default_fee_bps);
 
         // Issue #132: Automated fee rounding loss minimization, computed via the
         // shared `compute_split` core also used by the Issue #129 dry-run getter.
@@ -393,6 +461,39 @@ impl PaymentDistributor {
         Ok(storage::get_investor_bonus_bps(&env))
     }
 
+    /// Issue #448: Admin-only: configure tiered volume-based platform fee schedule.
+    /// Tiers should be ordered by min_amount and non-overlapping for correct behavior.
+    pub fn set_fee_tiers(
+        env: Env,
+        admin: Address,
+        tiers: Vec<types::FeeTier>,
+    ) -> Result<(), Error> {
+        let stored_admin = storage::get_admin(&env).ok_or(Error::NotInit)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        admin.require_auth();
+
+        // Validate all tiers
+        for tier in tiers.iter() {
+            if tier.fee_bps > MAX_FEE_BPS {
+                return Err(Error::InvalidBps);
+            }
+            if tier.min_amount < 0 || (tier.max_amount > 0 && tier.max_amount < tier.min_amount) {
+                return Err(Error::InvalidAmount);
+            }
+        }
+
+        storage::set_fee_tiers(&env, &tiers);
+        Ok(())
+    }
+
+    /// View: return the configured fee tiers for volume-based platform fee schedule.
+    pub fn get_fee_tiers(env: Env) -> Result<Option<Vec<types::FeeTier>>, Error> {
+        storage::get_admin(&env).ok_or(Error::NotInit)?;
+        Ok(storage::get_fee_tiers(&env))
+    }
+
     /// Distribute the final refund for a refunded escrow.
     ///
     /// `addresses` is `[token, funder_1, .., funder_N]` (N >= 1). `amounts` is
@@ -448,35 +549,15 @@ impl PaymentDistributor {
                 return Err(Error::InvalidAmount);
             }
 
-            let mut total_weight: i128 = 0;
+            let mut weights = alloc::vec::Vec::with_capacity(funder_count as usize);
             for i in 0..funder_count {
                 let weight = amounts.get(1 + i).ok_or(Error::InvalidAmount)?;
-                if weight < 0 {
-                    return Err(Error::InvalidRefundWeight);
-                }
-                total_weight = total_weight.checked_add(weight).ok_or(Error::Overflow)?;
+                weights.push(weight);
             }
-            if total_weight <= 0 {
-                return Err(Error::InvalidRefundWeight);
-            }
-
-            let mut distributed: i128 = 0;
+            let shares = pro_rata_shares(refund_amount, &weights)?;
             for i in 0..funder_count {
                 let funder = addresses.get(1 + i).ok_or(Error::InvalidAmount)?;
-                let share = if i == funder_count - 1 {
-                    // Last funder absorbs any rounding dust to conserve the total.
-                    refund_amount
-                        .checked_sub(distributed)
-                        .ok_or(Error::Overflow)?
-                } else {
-                    let weight = amounts.get(1 + i).ok_or(Error::InvalidAmount)?;
-                    refund_amount
-                        .checked_mul(weight)
-                        .ok_or(Error::Overflow)?
-                        .checked_div(total_weight)
-                        .ok_or(Error::Overflow)?
-                };
-                distributed = distributed.checked_add(share).ok_or(Error::Overflow)?;
+                let share = *shares.get(i as usize).ok_or(Error::InvalidAmount)?;
                 recipients.push_back(funder);
                 recipient_amounts.push_back(share);
             }
@@ -596,32 +677,6 @@ impl PaymentDistributor {
         Ok(())
     }
 
-    /// Issue #119: Implement Dust Amount Collector and Sweep Function.
-    ///
-    /// Admin-only function to sweep leftover token balances to the configured
-    /// fee recipient (or admin if not set).
-    pub fn sweep_dust(env: Env, admin: Address, token: Address) -> Result<(), Error> {
-        let stored_admin = storage::get_admin(&env).ok_or(Error::NotInit)?;
-        if admin != stored_admin {
-            return Err(Error::Unauthorized);
-        }
-        admin.require_auth();
-
-        let token_client = token::Client::new(&env, &token);
-        let contract_addr = env.current_contract_address();
-        let balance = token_client.balance(&contract_addr);
-        if balance <= 0 {
-            return Err(Error::NothingToSweep);
-        }
-
-        let fee_recipient =
-            storage::get_fee_recipient(&env).unwrap_or_else(|| stored_admin.clone());
-
-        token_client.transfer(&contract_addr, &fee_recipient, &balance);
-        events::dust_swept(&env, &admin, &token, &fee_recipient, balance);
-        Ok(())
-    }
-
     /// View: return the current admin.
     pub fn get_admin(env: Env) -> Result<Address, Error> {
         storage::get_admin(&env).ok_or(Error::NotInit)
@@ -713,6 +768,136 @@ impl PaymentDistributor {
             investor_amount,
             fee_bps_u32,
         )
+    }
+
+    // ── Issue #444: Residual dust sweep & recipient invariant validation ────
+
+    /// Sweep residual token balances held by this contract to the admin.
+    ///
+    /// After distributions, rounding and partial fills can leave sub-unit
+    /// ("dust") balances stranded in the contract. Over many distributions
+    /// these accumulate and inflate the contract's visible balance without
+    /// belonging to any party. This function lets the admin reclaim them.
+    ///
+    /// The swept amount is the full contract balance for `token`. If the
+    /// balance is zero, `NothingToSweep` is returned.
+    pub fn sweep_dust(env: Env, admin: Address, token: Address) -> Result<i128, Error> {
+        let stored_admin = storage::get_admin(&env).ok_or(Error::NotInit)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        admin.require_auth();
+
+        let token_client = token::Client::new(&env, &token);
+        let balance = token_client.balance(&env.current_contract_address());
+        if balance <= 0 {
+            return Err(Error::NothingToSweep);
+        }
+
+        let fee_recipient = storage::get_fee_recipient(&env)
+            .unwrap_or_else(|| storage::get_admin(&env).expect("admin must exist"));
+        token_client.transfer(&env.current_contract_address(), &fee_recipient, &balance);
+
+        events::dust_swept(&env, &admin, &token, &fee_recipient, balance);
+        Ok(balance)
+    }
+
+    /// Issue #482: automated refund fallback for excess funds.
+    ///
+    /// `distribute_payment` only rejects a balance that is too *low*; anything
+    /// the escrow over-deposits relative to the amounts actually paid out stays
+    /// in the distributor. Before this existed the only way to recover it was
+    /// for an admin to notice and call `sweep_dust`, which sends the entire
+    /// balance to the fee recipient — the wrong destination for funds the
+    /// platform never earned, and something that has to be done manually every
+    /// time it happens.
+    ///
+    /// This hands the leftover back to the escrow that deposited it, so the
+    /// refund is automatic from the escrow's side (it can call this whenever it
+    /// has overpaid) and the funds go back to their rightful owner rather than
+    /// to the platform. Only the escrow bound to the distribution is allowed to
+    /// call it, and the call must be authorized by that escrow.
+    ///
+    /// Note this returns the full remaining balance of `token`, not a
+    /// per-invoice remainder: the distributor does not track deposits per
+    /// invoice, so it cannot attribute a surplus to a specific one. Callers
+    /// should only invoke it when no other distribution is in flight, which is
+    /// the case at the end of an escrow's settlement.
+    ///
+    /// Returns the amount refunded.
+    pub fn refund_excess(
+        env: Env,
+        escrow_contract: Address,
+        token: Address,
+        invoice_id: Symbol,
+    ) -> Result<i128, Error> {
+        acquire_lock(&env)?;
+
+        storage::get_admin(&env).ok_or(Error::NotInit)?;
+        escrow_contract.require_auth();
+
+        if let Some(whitelisted) = storage::get_escrow_contract(&env) {
+            if whitelisted != escrow_contract {
+                return Err(Error::UnauthorizedEscrow);
+            }
+        }
+
+        let contract_addr = env.current_contract_address();
+        let token_client = token::Client::new(&env, &token);
+        let balance = token_client.balance(&contract_addr);
+        if balance <= 0 {
+            return Err(Error::NothingToRefund);
+        }
+
+        token_client.transfer(&contract_addr, &escrow_contract, &balance);
+        events::excess_refunded(&env, &escrow_contract, &token, &invoice_id, balance);
+
+        release_lock(&env);
+        Ok(balance)
+    }
+
+    /// Validate that all recipients in a distribution are distinct non-zero
+    /// addresses and that no recipient is the contract itself.
+    ///
+    /// Call this before executing any distribution to fail-fast on malformed
+    /// splits rather than partially distributing and leaving state inconsistent.
+    pub fn validate_recipients(
+        env: Env,
+        _token: Address,
+        recipients: Vec<Address>,
+    ) -> Result<(), Error> {
+        let contract_addr = env.current_contract_address();
+        let mut seen = soroban_sdk::Map::<Address, bool>::new(&env);
+
+        for i in 0..recipients.len() {
+            let addr = recipients.get(i).ok_or(Error::InvalidSplit)?;
+
+            // Reject the contract itself as a recipient — funds would be
+            // irrecoverable without a dedicated sweep path.
+            if addr == contract_addr {
+                return Err(Error::InvalidSplit);
+            }
+
+            // Reject duplicate recipients — two entries for the same address
+            // would silently merge into a single transfer, losing the intended
+            // split semantics.
+            if seen.contains_key(addr.clone()) {
+                return Err(Error::InvalidSplit);
+            }
+            seen.set(addr.clone(), true);
+
+            // Reject zero-address recipients.
+            let zero_str = soroban_sdk::String::from_str(
+                &env,
+                "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            );
+            let zero = Address::from_string(&zero_str);
+            if addr == zero {
+                return Err(Error::InvalidSplit);
+            }
+        }
+
+        Ok(())
     }
 }
 

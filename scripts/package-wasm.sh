@@ -14,7 +14,7 @@
 #                (default: dist/)
 #
 # Requirements:
-#   - Rust with wasm32-unknown-unknown target installed
+#   - Rust with wasm32v1-none target installed
 #   - sha256sum (coreutils)
 # =============================================================================
 
@@ -45,10 +45,10 @@ command -v sha256sum >/dev/null 2>&1 || die "sha256sum not found. Install coreut
 info "Building WASM contracts..."
 cd "${REPO_ROOT}"
 
-cargo build --release --target wasm32-unknown-unknown \
+cargo build --release --target wasm32v1-none \
   -p invoice-escrow -p invoice-token -p payment-distributor
 
-WASM_DIR="target/wasm32-unknown-unknown/release"
+WASM_DIR="target/wasm32v1-none/release"
 REQUIRED_FILES=(
   "invoice_escrow.wasm"
   "invoice_token.wasm"

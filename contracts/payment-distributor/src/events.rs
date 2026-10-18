@@ -140,3 +140,19 @@ pub fn dust_swept(env: &Env, admin: &Address, token: &Address, to: &Address, amo
     env.events()
         .publish(topics, (admin.clone(), to.clone(), amount));
 }
+
+/// Issue #482: excess funds returned to the escrow that deposited them.
+pub fn excess_refunded(
+    env: &Env,
+    escrow: &Address,
+    token: &Address,
+    invoice_id: &Symbol,
+    amount: i128,
+) {
+    let topics = (
+        Symbol::new(env, "ExcessRefunded"),
+        token.clone(),
+        invoice_id.clone(),
+    );
+    env.events().publish(topics, (escrow.clone(), amount));
+}

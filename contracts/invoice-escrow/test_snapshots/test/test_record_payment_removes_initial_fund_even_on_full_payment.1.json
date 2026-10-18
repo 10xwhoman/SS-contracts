@@ -118,7 +118,7 @@
                   "i128": "5000"
                 },
                 {
-                  "u64": "100"
+                  "u64": "3600"
                 },
                 {
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
@@ -326,7 +326,7 @@
                       "symbol": "due_dt"
                     },
                     "val": {
-                      "u64": "100"
+                      "u64": "3600"
                     }
                   },
                   {
@@ -441,7 +441,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 1036800
       },
       {
         "entry": {
@@ -471,7 +471,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 1036800
       },
       {
         "entry": {
@@ -516,6 +516,14 @@
                           },
                           {
                             "key": {
+                              "symbol": "min_investment"
+                            },
+                            "val": {
+                              "i128": "0"
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "paused"
                             },
                             "val": {
@@ -552,7 +560,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 1036800
       },
       {
         "entry": {
@@ -1081,7 +1089,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 1036800
       }
     ]
   },
