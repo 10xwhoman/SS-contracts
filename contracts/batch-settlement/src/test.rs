@@ -2,9 +2,17 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events as _, Ledger as _},
+    testutils::{Address as _, Ledger as _},
+    token::StellarAssetClient as AssetClient,
     Address, BytesN, Env, Vec,
 };
+
+fn setup_token(env: &Env) -> (Address, AssetClient<'_>) {
+    let token_admin = Address::generate(env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin);
+    let asset = AssetClient::new(env, &token_id.address());
+    (token_id.address(), asset)
+}
 
 #[test]
 fn test_batch_settle_success_and_prorata() {
@@ -17,7 +25,9 @@ fn test_batch_settle_success_and_prorata() {
 
     let admin = Address::generate(&env);
     let operator = Address::generate(&env);
-    let token = Address::generate(&env);
+    let (token, asset) = setup_token(&env);
+    // Fund the settlement contract so pro-rata payouts can transfer.
+    asset.mint(&contract_id, &10_000);
     let investor1 = Address::generate(&env);
     let investor2 = Address::generate(&env);
 
@@ -80,7 +90,7 @@ fn test_batch_reverts_if_any_invoice_fails_validation() {
 
     let admin = Address::generate(&env);
     let operator = Address::generate(&env);
-    let token = Address::generate(&env);
+    let (token, _asset) = setup_token(&env);
     let investor = Address::generate(&env);
 
     client.initialize(&admin, &operator);

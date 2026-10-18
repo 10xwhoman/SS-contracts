@@ -2,9 +2,17 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events as _, Ledger as _},
+    testutils::{Address as _, Ledger as _},
+    token::StellarAssetClient as AssetClient,
     Address, BytesN, Env, Vec,
 };
+
+fn setup_token(env: &Env) -> (Address, AssetClient<'_>) {
+    let token_admin = Address::generate(env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin);
+    let asset = AssetClient::new(env, &token_id.address());
+    (token_id.address(), asset)
+}
 
 #[test]
 fn test_initialize_and_create_vest() {
@@ -16,7 +24,7 @@ fn test_initialize_and_create_vest() {
 
     let admin = Address::generate(&env);
     let beneficiary = Address::generate(&env);
-    let token = Address::generate(&env);
+    let (token, _asset) = setup_token(&env);
     let invoice_id = BytesN::from_array(&env, &[1u8; 32]);
 
     client.initialize(&admin);
@@ -54,7 +62,7 @@ fn test_claim_tranche_blocked_before_release_time() {
 
     let admin = Address::generate(&env);
     let beneficiary = Address::generate(&env);
-    let token = Address::generate(&env);
+    let (token, _asset) = setup_token(&env);
     let invoice_id = BytesN::from_array(&env, &[1u8; 32]);
 
     client.initialize(&admin);
@@ -83,7 +91,8 @@ fn test_claim_tranche_success_after_release_time() {
 
     let admin = Address::generate(&env);
     let beneficiary = Address::generate(&env);
-    let token = Address::generate(&env);
+    let (token, asset) = setup_token(&env);
+    asset.mint(&contract_id, &10_000);
     let invoice_id = BytesN::from_array(&env, &[1u8; 32]);
 
     client.initialize(&admin);
@@ -122,7 +131,8 @@ fn test_batch_claim_and_claim_all_eligible() {
 
     let admin = Address::generate(&env);
     let beneficiary = Address::generate(&env);
-    let token = Address::generate(&env);
+    let (token, asset) = setup_token(&env);
+    asset.mint(&contract_id, &10_000);
     let invoice_id = BytesN::from_array(&env, &[1u8; 32]);
 
     client.initialize(&admin);

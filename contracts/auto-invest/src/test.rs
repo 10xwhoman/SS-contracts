@@ -2,14 +2,24 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events as _},
+    testutils::Address as _,
+    token::{Client as TokenClient, StellarAssetClient as AssetClient},
     Address, BytesN, Env,
 };
+
+fn setup_token(env: &Env, mint_to: &Address, amount: i128) -> Address {
+    let token_admin = Address::generate(env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin);
+    let asset = AssetClient::new(env, &token_id.address());
+    asset.mint(mint_to, &amount);
+    token_id.address()
+}
 
 #[test]
 fn test_auto_invest_rule_and_execution() {
     let env = Env::default();
-    env.mock_all_auths();
+    // Operator invokes; token.transfer still needs the investor's auth.
+    env.mock_all_auths_allowing_non_root_auth();
 
     let contract_id = env.register(AutoInvest, ());
     let client = AutoInvestClient::new(&env, &contract_id);
@@ -17,7 +27,7 @@ fn test_auto_invest_rule_and_execution() {
     let admin = Address::generate(&env);
     let operator = Address::generate(&env);
     let investor = Address::generate(&env);
-    let token = Address::generate(&env);
+    let token = setup_token(&env, &investor, 10_000);
 
     client.initialize(&admin, &operator);
 
@@ -50,6 +60,10 @@ fn test_auto_invest_rule_and_execution() {
     let updated_listing = client.get_listing(&id);
     assert_eq!(updated_listing.funding_needed, 500);
     assert!(updated_listing.is_open);
+
+    let token_client = TokenClient::new(&env, &token);
+    assert_eq!(token_client.balance(&contract_id), 500);
+    assert_eq!(token_client.balance(&investor), 9_500);
 }
 
 #[test]
@@ -63,7 +77,7 @@ fn test_auto_invest_reverts_on_criteria_mismatch() {
     let admin = Address::generate(&env);
     let operator = Address::generate(&env);
     let investor = Address::generate(&env);
-    let token = Address::generate(&env);
+    let token = setup_token(&env, &investor, 1_000);
 
     client.initialize(&admin, &operator);
 
@@ -95,7 +109,7 @@ fn test_disable_auto_invest_prevents_execution() {
     let admin = Address::generate(&env);
     let operator = Address::generate(&env);
     let investor = Address::generate(&env);
-    let token = Address::generate(&env);
+    let token = setup_token(&env, &investor, 1_000);
 
     client.initialize(&admin, &operator);
 

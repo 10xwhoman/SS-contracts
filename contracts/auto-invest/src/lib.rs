@@ -211,6 +211,17 @@ impl AutoInvest {
             return Err(Error::InvalidAmount);
         }
 
+        // Transfer first so a short wallet balance cannot leave rule/listing
+        // accounting half-applied. Investor auth is required for the pull
+        // (operator may invoke, but the wallet must authorize the spend).
+        wallet.require_auth();
+        let token_client = token::Client::new(&env, &listing.token);
+        let wallet_bal = token_client.balance(&wallet);
+        if wallet_bal < invest_amount {
+            return Err(Error::InvalidAmount);
+        }
+        token_client.transfer(&wallet, &env.current_contract_address(), &invest_amount);
+
         rule.total_invested = rule
             .total_invested
             .checked_add(invest_amount)
@@ -232,13 +243,6 @@ impl AutoInvest {
             .set(&StorageKey::Listing(invoice_id.clone()), &listing);
 
         events::auto_invest_executed(&env, &wallet, &invoice_id, invest_amount);
-
-        // Optional token transfer if pre-authorized / funded
-        let client = token::Client::new(&env, &listing.token);
-        let wallet_bal = client.balance(&wallet);
-        if wallet_bal >= invest_amount {
-            // Transfer from wallet or contract
-        }
 
         Ok(invest_amount)
     }
