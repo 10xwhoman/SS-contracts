@@ -138,4 +138,6 @@ pub enum Error {
     /// Investment would push the total raised above the maximum funding
     /// threshold (invoice funding capacity is exhausted).
     MaxFundingThresholdExceeded = 63,
+    /// Wallet's secondary-market buy limit for the current window was exceeded.
+    BuyLimitExceeded = 64,
 }
