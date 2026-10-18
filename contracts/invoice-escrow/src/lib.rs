@@ -6,6 +6,7 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 
+mod buy_limit;
 mod errors;
 mod events;
 mod storage;
@@ -17,6 +18,7 @@ use types::{MultiSigConfig, SettlementProposal};
 
 // EscrowStatus is re-exported publicly; Config, EscrowData, and InvoiceData are crate-private.
 pub use types::EscrowStatus;
+pub use types::FundingStatus;
 pub use types::InstallmentMilestone;
 pub use types::InvoiceCategory;
 use types::{
@@ -24,7 +26,18 @@ use types::{
     InvoiceData, InvoiceStatus,
 };
 
-use errors::Error;
+pub use errors::Error;
+
+/// Percentage of the funding target filled, expressed in basis points
+/// (10_000 = 100%). Returns 0 for a non-positive target or raised amount and
+/// caps at 10_000 when the target is exceeded.
+fn percent_filled_bps(raised: i128, target: i128) -> u32 {
+    if target <= 0 || raised <= 0 {
+        return 0;
+    }
+    let bps = raised.saturating_mul(10_000) / target;
+    core::cmp::min(bps, 10_000) as u32
+}
 
 /// Reject the zero address (all-zero 32-byte Ed25519 key) which is never a valid participant.
 fn ensure_non_zero_address(env: &Env, address: &Address) -> Result<(), Error> {
@@ -160,6 +173,7 @@ impl InvoiceEscrow {
             admin: admin.clone(),
             fee_bps: platform_fee_bps,
             payment_distributor: None,
+            referral_contract: None,
             paused: false,
             whitelist_enabled: false,
             min_investment: 0,
@@ -583,12 +597,10 @@ impl InvoiceEscrow {
                         (EscrowStatus::Cancelled as u32).into_val(&env)
                     ],
                 );
-            } else {
-                if let Some(funder) = &funder_opt {
-                    let funder_amt = storage::get_funder_amount(&env, invoice_id.clone(), funder);
-                    if funder_amt > 0 {
-                        token.transfer(&contract, funder, &funder_amt);
-                    }
+            } else if let Some(funder) = &funder_opt {
+                let funder_amt = storage::get_funder_amount(&env, invoice_id.clone(), funder);
+                if funder_amt > 0 {
+                    token.transfer(&contract, funder, &funder_amt);
                 }
             }
 
@@ -967,11 +979,30 @@ impl InvoiceEscrow {
         if data.status == EscrowStatus::Funded {
             events::escrow_status_changed(
                 env,
-                invoice_id,
+                invoice_id.clone(),
                 EscrowStatus::Funded,
                 env.ledger().timestamp(),
             );
         }
+
+        // Best-effort referral fee accrual: if a referral contract is configured,
+        // notify it of this investment so it can accrue rewards to the buyer's referrer.
+        // Errors from the referral contract are swallowed so a referral misconfiguration
+        // never blocks a legitimate investment.
+        if let Some(referral_addr) = config.referral_contract.as_ref() {
+            let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+                referral_addr,
+                &Symbol::new(env, "accrue_referral_fee"),
+                soroban_sdk::vec![
+                    env,
+                    contract.to_val(),
+                    invoice_id.into_val(env),
+                    buyer.to_val(),
+                    amount.into_val(env),
+                ],
+            );
+        }
+
         Ok(())
     }
 
@@ -1465,6 +1496,29 @@ impl InvoiceEscrow {
         Ok(())
     }
 
+    /// Set the referral contract called on each investment to accrue referral fees.
+    /// Admin only. Pass the same address again to update, or a zero address is not
+    /// accepted — use `clear_referral_contract` to remove the binding.
+    pub fn set_referral_contract(env: Env, referral_contract: Address) -> Result<(), Error> {
+        let mut config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        let admin = config.admin.clone();
+        admin.require_auth();
+        config.referral_contract = Some(referral_contract);
+        storage::set_config(&env, &config);
+        Ok(())
+    }
+
+    /// Remove the referral contract binding so investments no longer trigger
+    /// referral fee accrual. Admin only.
+    pub fn clear_referral_contract(env: Env) -> Result<(), Error> {
+        let mut config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        let admin = config.admin.clone();
+        admin.require_auth();
+        config.referral_contract = None;
+        storage::set_config(&env, &config);
+        Ok(())
+    }
+
     /// Toggle the emergency pause flag. Admin only.
     pub fn set_paused(env: Env, paused: bool) -> Result<(), Error> {
         let mut config = storage::get_config(&env).ok_or(Error::NotInit)?;
@@ -1640,10 +1694,50 @@ impl InvoiceEscrow {
 
     // ?? Position management: top_up / partial_refund / transfer_position / finalise_funding ??
 
-    /// Create a funding invoice (BytesN<32> id) for the new position management flows.
-    /// This is the setup entrypoint for tests and admin tooling for the
-    /// top_up / partial_refund / transfer_position / finalise_funding lifecycle.
+    /// Create a funding invoice (BytesN<32> id) for the position management flows.
+    ///
+    /// Funding proceeds between `min_funding_threshold` and `max_funding_threshold`:
+    /// * `invest` / `top_up` reject amounts that would push the total raised
+    ///   above `max_funding_threshold` (partial investment up to the remaining
+    ///   capacity is accepted);
+    /// * `release_to_issuer` only succeeds once the total raised has reached
+    ///   `min_funding_threshold`;
+    /// * `ThresholdReached` is emitted the first time the minimum is crossed.
+    ///
+    /// Thresholds must satisfy `0 < min_funding_threshold <= funding_target <=
+    /// max_funding_threshold`, so the target is always achievable within the cap.
     pub fn create_invoice(
+        env: Env,
+        invoice_id: BytesN<32>,
+        seller: Address,
+        funding_target: i128,
+        min_funding_threshold: i128,
+        max_funding_threshold: i128,
+        deadline_ledger: u32,
+        min_investment: i128,
+        per_investor_cap: Option<i128>,
+        token: Address,
+    ) -> Result<(), Error> {
+        seller.require_auth();
+        Self::create_invoice_core(
+            &env,
+            invoice_id,
+            seller,
+            funding_target,
+            min_funding_threshold,
+            max_funding_threshold,
+            deadline_ledger,
+            min_investment,
+            per_investor_cap,
+            token,
+        )
+    }
+
+    /// Backwards-compatible `create_invoice` without explicit thresholds.
+    /// Keeps the legacy behaviour: the invoice must be fully funded before
+    /// release and can never exceed its target, i.e.
+    /// `min_funding_threshold == max_funding_threshold == funding_target`.
+    pub fn create_invoice_legacy(
         env: Env,
         invoice_id: BytesN<32>,
         seller: Address,
@@ -1654,26 +1748,68 @@ impl InvoiceEscrow {
         token: Address,
     ) -> Result<(), Error> {
         seller.require_auth();
+        Self::create_invoice_core(
+            &env,
+            invoice_id,
+            seller,
+            funding_target,
+            funding_target,
+            funding_target,
+            deadline_ledger,
+            min_investment,
+            per_investor_cap,
+            token,
+        )
+    }
+
+    /// Shared validation + storage for `create_invoice` / `create_invoice_legacy`.
+    fn create_invoice_core(
+        env: &Env,
+        invoice_id: BytesN<32>,
+        seller: Address,
+        funding_target: i128,
+        min_funding_threshold: i128,
+        max_funding_threshold: i128,
+        deadline_ledger: u32,
+        min_investment: i128,
+        per_investor_cap: Option<i128>,
+        token: Address,
+    ) -> Result<(), Error> {
         if funding_target <= 0 {
             return Err(Error::InvalidAmount);
+        }
+        if min_funding_threshold <= 0
+            || min_funding_threshold > funding_target
+            || funding_target > max_funding_threshold
+        {
+            return Err(Error::InvalidFundingThreshold);
         }
         if min_investment < 0 {
             return Err(Error::InvalidAmount);
         }
-        if storage::has_invoice(&env, invoice_id.clone()) {
+        if storage::has_invoice(env, invoice_id.clone()) {
             return Err(Error::EscrowExists);
         }
         let invoice = FundingInvoice {
-            seller: seller.clone(),
+            seller,
             funding_target,
             total_raised: 0,
             deadline_ledger,
             min_investment,
             per_investor_cap,
             status: InvoiceStatus::Open,
-            token: token.clone(),
+            token,
+            min_funding_threshold,
+            max_funding_threshold,
+            threshold_reached: false,
         };
-        storage::set_invoice(&env, invoice_id, &invoice);
+        storage::set_invoice(env, invoice_id.clone(), &invoice);
+        events::funding_thresholds_set(
+            env,
+            &invoice_id,
+            min_funding_threshold,
+            max_funding_threshold,
+        );
         Ok(())
     }
 
@@ -1710,8 +1846,8 @@ impl InvoiceEscrow {
             .total_raised
             .checked_add(additional_amount)
             .ok_or(Error::Overflow)?;
-        if new_total_raised > invoice.funding_target {
-            return Err(Error::InvalidAmount);
+        if new_total_raised > invoice.max_funding_threshold {
+            return Err(Error::MaxFundingThresholdExceeded);
         }
         // Transfer additional_amount from investor to contract
         let token_client = token::Client::new(&env, &invoice.token);
@@ -1722,6 +1858,15 @@ impl InvoiceEscrow {
         );
         storage::set_investor_position(&env, &invoice_id, &investor, new_total_position);
         invoice.total_raised = new_total_raised;
+        if !invoice.threshold_reached && new_total_raised >= invoice.min_funding_threshold {
+            invoice.threshold_reached = true;
+            events::threshold_reached(
+                &env,
+                &invoice_id,
+                invoice.min_funding_threshold,
+                new_total_raised,
+            );
+        }
         storage::set_invoice(&env, invoice_id.clone(), &invoice);
         events::investment_topped_up(
             &env,
@@ -1852,8 +1997,8 @@ impl InvoiceEscrow {
                 .total_raised
                 .checked_add(amount)
                 .ok_or(Error::Overflow)?;
-            if new_total > invoice.funding_target {
-                return Err(Error::InvalidAmount);
+            if new_total > invoice.max_funding_threshold {
+                return Err(Error::MaxFundingThresholdExceeded);
             }
             let current = storage::get_investor_position(&env, &invoice_id, &investor);
             let new_pos = current.checked_add(amount).ok_or(Error::Overflow)?;
@@ -1866,6 +2011,15 @@ impl InvoiceEscrow {
             token_client.transfer(&investor, env.current_contract_address(), &amount);
             storage::set_investor_position(&env, &invoice_id, &investor, new_pos);
             invoice.total_raised = new_total;
+            if !invoice.threshold_reached && new_total >= invoice.min_funding_threshold {
+                invoice.threshold_reached = true;
+                events::threshold_reached(
+                    &env,
+                    &invoice_id,
+                    invoice.min_funding_threshold,
+                    new_total,
+                );
+            }
             storage::set_invoice(&env, invoice_id, &invoice);
             return Ok(());
         }
@@ -1991,6 +2145,7 @@ impl InvoiceEscrow {
             return Err(Error::NoPositionFound);
         }
         to.require_auth();
+        buy_limit::record_purchase(&env, &invoice_id, &to, position)?;
         if price > 0 {
             let token_client = token::Client::new(&env, &invoice.token);
             token_client.transfer(&to, &from, &price);
@@ -2010,16 +2165,23 @@ impl InvoiceEscrow {
         Ok(())
     }
 
-    /// Finalise funding: transition Open->Funded when target reached, release proceeds to seller.
-    pub fn finalise_funding(env: Env, invoice_id: BytesN<32>) -> Result<(), Error> {
+    /// Release funding proceeds to the issuer (seller) once the minimum funding
+    /// threshold has been reached. Admin-only.
+    ///
+    /// For a `FundingInvoice`, requires `total_raised >= min_funding_threshold`,
+    /// transitions the invoice Open -> Funded, and transfers the raised amount
+    /// to the seller. For a registered `InvoiceData` invoice the minimum
+    /// threshold defaults to its funding target.
+    pub fn release_to_issuer(env: Env, invoice_id: BytesN<32>) -> Result<(), Error> {
+        let config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        config.admin.require_auth();
+
         if let Some(mut invoice) = storage::get_invoice(&env, invoice_id.clone()) {
-            let config = storage::get_config(&env).ok_or(Error::NotInit)?;
-            config.admin.require_auth();
             if invoice.status != InvoiceStatus::Open {
                 return Err(Error::InvalidInvoiceStatus);
             }
-            if invoice.total_raised < invoice.funding_target {
-                return Err(Error::FundingTargetNotReached);
+            if invoice.total_raised < invoice.min_funding_threshold {
+                return Err(Error::FundingThresholdNotReached);
             }
             invoice.status = InvoiceStatus::Funded;
             storage::set_invoice(&env, invoice_id.clone(), &invoice);
@@ -2040,9 +2202,53 @@ impl InvoiceEscrow {
         if record.status != EscrowStatus::Created && record.status != EscrowStatus::Funded {
             return Err(Error::InvalidInvoiceStatus);
         }
+        if record.total_raised < record.funding_target {
+            return Err(Error::FundingThresholdNotReached);
+        }
         record.status = EscrowStatus::Funded;
         storage::set_invoice_record(&env, &invoice_id, &record);
         Ok(())
+    }
+
+    /// Finalise funding: legacy alias for `release_to_issuer` on position
+    /// invoices, and Created/Funded -> Funded for registered invoices.
+    pub fn finalise_funding(env: Env, invoice_id: BytesN<32>) -> Result<(), Error> {
+        if storage::get_invoice(&env, invoice_id.clone()).is_some() {
+            return Self::release_to_issuer(env, invoice_id);
+        }
+
+        let mut record =
+            storage::get_invoice_record(&env, &invoice_id).ok_or(Error::EscrowNotFound)?;
+        if record.status != EscrowStatus::Created && record.status != EscrowStatus::Funded {
+            return Err(Error::InvalidInvoiceStatus);
+        }
+        record.status = EscrowStatus::Funded;
+        storage::set_invoice_record(&env, &invoice_id, &record);
+        Ok(())
+    }
+
+    /// View: funding progress for an invoice (registered or position invoice).
+    ///
+    /// Returns the total raised, the configured minimum/maximum funding
+    /// thresholds, and the percentage of the funding target filled in basis
+    /// points (10_000 = 100%). Registered invoices use their funding target as
+    /// both the minimum and maximum threshold.
+    pub fn get_funding_status(env: Env, invoice_id: BytesN<32>) -> Result<FundingStatus, Error> {
+        if let Some(invoice) = storage::get_invoice(&env, invoice_id.clone()) {
+            return Ok(FundingStatus {
+                raised: invoice.total_raised,
+                min_threshold: invoice.min_funding_threshold,
+                max_threshold: invoice.max_funding_threshold,
+                percent_filled_bps: percent_filled_bps(invoice.total_raised, invoice.funding_target),
+            });
+        }
+        let record = storage::get_invoice_record(&env, &invoice_id).ok_or(Error::EscrowNotFound)?;
+        Ok(FundingStatus {
+            raised: record.total_raised,
+            min_threshold: record.funding_target,
+            max_threshold: record.funding_target,
+            percent_filled_bps: percent_filled_bps(record.total_raised, record.funding_target),
+        })
     }
 
     /// Refund an investor's committed position if deadline passed without reaching target.
@@ -2423,6 +2629,8 @@ mod benchmarks;
 mod integration_test;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_buy_limit;
 
 // Modules added for batch resolution of #479, #480, #481
 pub mod insurance_pool;

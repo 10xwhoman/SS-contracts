@@ -3,9 +3,18 @@ resolver = "2"
 members = [
     "contracts/auto-invest",
     "contracts/batch-settlement",
+    "contracts/categorisation-registry",
+    "contracts/fee-treasury",
     "contracts/investor-scoring",
     "contracts/invoice-escrow",
+    "contracts/invoice-maturity",
+    "contracts/invoice-refund",
+    "contracts/invoice-snapshot",
     "contracts/invoice-token",
+    "contracts/multisig-admin",
+    "contracts/nonce-registry",
+    "contracts/order-book",
+    "contracts/partial-settlement",
     "contracts/payment-distributor",
     "contracts/yield-vesting",
 ]

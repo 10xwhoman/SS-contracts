@@ -45,6 +45,10 @@ pub enum StorageKey {
     InstallmentSchedule(soroban_sdk::Symbol),
     /// Instance: pending admin parameter change awaiting timelock expiry.
     PendingParamChange,
+    /// Persistent: secondary-market buy limit by invoice id.
+    BuyLimit(soroban_sdk::BytesN<32>),
+    /// Persistent: a wallet's current buy-limit window by (invoice_id, wallet).
+    BuyWindow(soroban_sdk::BytesN<32>, soroban_sdk::Address),
 }
 
 /// Registered invoice metadata and funding parameters stored in persistent storage.
@@ -81,6 +85,8 @@ pub struct Config {
     pub fee_bps: u32,
     /// Optional payment distributor contract used for settlement/refund fan-out.
     pub payment_distributor: Option<soroban_sdk::Address>,
+    /// Optional referral contract called on each investment to accrue referral fees.
+    pub referral_contract: Option<soroban_sdk::Address>,
     /// Emergency pause flag for lifecycle-changing operations.
     pub paused: bool,
     /// When true, `fund_escrow` requires the buyer to be on the whitelist.
@@ -268,6 +274,30 @@ pub struct FundingInvoice {
     pub status: InvoiceStatus,
     /// Payment token contract address.
     pub token: soroban_sdk::Address,
+    /// Minimum funding threshold: `release_to_issuer` only succeeds once
+    /// `total_raised` has reached this value.
+    pub min_funding_threshold: i128,
+    /// Maximum funding threshold: hard cap on `total_raised`. `invest` and
+    /// `top_up` reject amounts that would push the total above it.
+    pub max_funding_threshold: i128,
+    /// Whether `ThresholdReached` has already been emitted for this invoice.
+    /// Guarantees the event fires exactly once per invoice.
+    pub threshold_reached: bool,
+}
+
+/// Funding progress view returned by `get_funding_status`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FundingStatus {
+    /// Total amount raised so far across all investors.
+    pub raised: i128,
+    /// Minimum funding threshold configured for the invoice.
+    pub min_threshold: i128,
+    /// Maximum funding threshold configured for the invoice.
+    pub max_threshold: i128,
+    /// Percentage of the funding target filled, in basis points
+    /// (10_000 = 100%). Capped at 10_000 when the target is exceeded.
+    pub percent_filled_bps: u32,
 }
 /// Multi-signature configuration for emergency releases.
 #[contracttype]
