@@ -1058,6 +1058,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
+name = "grace-interest"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1241,6 +1248,13 @@ dependencies = [
  "invoice-token",
  "proptest",
  "referral",
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
+name = "invoice-extension"
+version = "0.1.0"
+dependencies = [
  "soroban-sdk 27.0.6",
 ]
 
@@ -1473,6 +1487,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "onboarding-bonus"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1574,6 +1595,13 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "price-cap"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
 ]
 
 [[package]]
