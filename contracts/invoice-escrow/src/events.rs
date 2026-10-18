@@ -13,6 +13,7 @@ use crate::types::EscrowStatus;
 /// topic. This ensures all events follow a consistent schema:
 ///   topics: [contract_address, event_name, ...]
 ///   data: <payload>
+#[allow(dead_code)]
 fn emit_event(env: &Env, event_name: &str, topics: soroban_sdk::Vec<Val>, data: Val) {
     let contract = env.current_contract_address();
     let mut full_topics = soroban_sdk::Vec::new(env);
@@ -236,6 +237,33 @@ pub fn funding_finalised(env: &Env, invoice_id: BytesN<32>, total_raised: i128, 
     env.events().publish(
         (Symbol::new(env, "funding_finalised"), invoice_id.clone()),
         (total_raised, seller.clone()),
+    );
+}
+
+/// Publish `ThresholdReached` the first time total raised crosses the invoice's
+/// minimum funding threshold. Emitted exactly once per invoice.
+pub fn threshold_reached(
+    env: &Env,
+    invoice_id: &BytesN<32>,
+    min_threshold: i128,
+    total_raised: i128,
+) {
+    env.events().publish(
+        (Symbol::new(env, "ThresholdReached"), invoice_id.clone()),
+        (min_threshold, total_raised),
+    );
+}
+
+/// Publish the per-invoice funding thresholds when an invoice is created.
+pub fn funding_thresholds_set(
+    env: &Env,
+    invoice_id: &BytesN<32>,
+    min_threshold: i128,
+    max_threshold: i128,
+) {
+    env.events().publish(
+        (Symbol::new(env, "funding_thresholds_set"), invoice_id.clone()),
+        (min_threshold, max_threshold),
     );
 }
 

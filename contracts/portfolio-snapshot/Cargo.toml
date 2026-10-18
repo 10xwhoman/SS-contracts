@@ -1,0 +1,16 @@
+[package]
+name = "portfolio-snapshot"
+version = "0.1.0"
+edition = "2021"
+# Deployed as WASM, never published to crates.io.
+publish = false
+description = "StellarSettle portfolio snapshot aggregation contract"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
