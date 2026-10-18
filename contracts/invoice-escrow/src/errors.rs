@@ -129,4 +129,7 @@ pub enum Error {
     SameAdminApproval = 59,
     /// No settlement proposal exists for the invoice.
     SettlementNotProposed = 60,
+    /// The purchase would exceed the buyer's secondary-market buy limit for
+    /// the current window; `get_buy_remaining` returns what is still allowed.
+    BuyLimitExceeded = 61,
 }
