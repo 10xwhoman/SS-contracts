@@ -957,7 +957,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "invoice-registry"
+name = "invoice-maturity"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "invoice-refund"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "invoice-snapshot"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
@@ -1059,7 +1073,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "nonce-registry"
+name = "multisig-admin"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
