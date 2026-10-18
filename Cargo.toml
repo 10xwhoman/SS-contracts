@@ -7,6 +7,9 @@ members = [
     "contracts/fee-treasury",
     "contracts/secondary-market-oracle",
     "contracts/transfer-restriction",
+    "contracts/issuer-reputation",
+    "contracts/access-control-registry",
+    "contracts/maturity-enforcement",
 ]
 
 [workspace.dependencies]
