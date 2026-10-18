@@ -30,6 +30,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "alert-subscription"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1241,6 +1248,20 @@ dependencies = [
  "invoice-token",
  "proptest",
  "referral",
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
+name = "invoice-insurance"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
+name = "invoice-rating"
+version = "0.1.0"
+dependencies = [
  "soroban-sdk 27.0.6",
 ]
 

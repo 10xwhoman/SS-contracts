@@ -1,0 +1,15 @@
+[package]
+name = "invoice-rating"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Post-settlement investor rating contract for invoice and issuer quality scores"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

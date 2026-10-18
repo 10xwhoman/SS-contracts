@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "contracts/alert-subscription",
     "contracts/auto-invest",
     "contracts/batch-settlement",
     "contracts/categorisation-registry",
@@ -10,6 +11,8 @@ members = [
     "contracts/investor-notifications",
     "contracts/investor-scoring",
     "contracts/invoice-escrow",
+    "contracts/invoice-insurance",
+    "contracts/invoice-rating",
     "contracts/invoice-token",
     "contracts/nonce-registry",
     "contracts/order-book",
