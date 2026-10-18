@@ -9,7 +9,9 @@ members = [
     "contracts/order-book",
     "contracts/partial-settlement",
     "contracts/payment-distributor",
-    "contracts/watchlist",
+    "contracts/invoice-registry",
+    "contracts/portfolio-snapshot",
+    "contracts/secondary-fee",
 ]
 
 [workspace.dependencies]

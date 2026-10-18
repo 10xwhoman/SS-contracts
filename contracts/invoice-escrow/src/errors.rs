@@ -129,7 +129,13 @@ pub enum Error {
     SameAdminApproval = 59,
     /// No settlement proposal exists for the invoice.
     SettlementNotProposed = 60,
-    /// The purchase would exceed the buyer's secondary-market buy limit for
-    /// the current window; `get_buy_remaining` returns what is still allowed.
-    BuyLimitExceeded = 61,
+    /// Funding thresholds are invalid (must satisfy
+    /// `0 < min <= funding_target <= max`).
+    InvalidFundingThreshold = 61,
+    /// Total raised is below the invoice's minimum funding threshold, so the
+    /// proceeds cannot be released to the issuer yet.
+    FundingThresholdNotReached = 62,
+    /// Investment would push the total raised above the maximum funding
+    /// threshold (invoice funding capacity is exhausted).
+    MaxFundingThresholdExceeded = 63,
 }

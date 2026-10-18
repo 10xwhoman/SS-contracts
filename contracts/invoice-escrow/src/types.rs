@@ -272,6 +272,30 @@ pub struct FundingInvoice {
     pub status: InvoiceStatus,
     /// Payment token contract address.
     pub token: soroban_sdk::Address,
+    /// Minimum funding threshold: `release_to_issuer` only succeeds once
+    /// `total_raised` has reached this value.
+    pub min_funding_threshold: i128,
+    /// Maximum funding threshold: hard cap on `total_raised`. `invest` and
+    /// `top_up` reject amounts that would push the total above it.
+    pub max_funding_threshold: i128,
+    /// Whether `ThresholdReached` has already been emitted for this invoice.
+    /// Guarantees the event fires exactly once per invoice.
+    pub threshold_reached: bool,
+}
+
+/// Funding progress view returned by `get_funding_status`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FundingStatus {
+    /// Total amount raised so far across all investors.
+    pub raised: i128,
+    /// Minimum funding threshold configured for the invoice.
+    pub min_threshold: i128,
+    /// Maximum funding threshold configured for the invoice.
+    pub max_threshold: i128,
+    /// Percentage of the funding target filled, in basis points
+    /// (10_000 = 100%). Capped at 10_000 when the target is exceeded.
+    pub percent_filled_bps: u32,
 }
 /// Multi-signature configuration for emergency releases.
 #[contracttype]
