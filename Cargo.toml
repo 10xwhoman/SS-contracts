@@ -1,8 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
+    "contracts/categorisation-registry",
+    "contracts/fee-treasury",
     "contracts/invoice-escrow",
     "contracts/invoice-token",
+    "contracts/nonce-registry",
+    "contracts/order-book",
+    "contracts/partial-settlement",
     "contracts/payment-distributor",
     "contracts/invoice-registry",
     "contracts/portfolio-snapshot",

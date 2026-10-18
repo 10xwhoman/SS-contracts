@@ -6,6 +6,7 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 
+mod buy_limit;
 mod errors;
 mod events;
 mod storage;
@@ -2103,6 +2104,7 @@ impl InvoiceEscrow {
             return Err(Error::NoPositionFound);
         }
         to.require_auth();
+        buy_limit::record_purchase(&env, &invoice_id, &to, position)?;
         if price > 0 {
             let token_client = token::Client::new(&env, &invoice.token);
             token_client.transfer(&to, &from, &price);
@@ -2586,6 +2588,8 @@ mod benchmarks;
 mod integration_test;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_buy_limit;
 
 // Modules added for batch resolution of #479, #480, #481
 pub mod insurance_pool;

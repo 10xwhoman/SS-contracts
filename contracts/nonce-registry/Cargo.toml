@@ -1,0 +1,15 @@
+[package]
+name = "nonce-registry"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Replay protection for off-chain signed messages via a per-wallet nonce registry"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
