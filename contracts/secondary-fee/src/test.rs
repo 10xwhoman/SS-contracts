@@ -3,10 +3,10 @@
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 use soroban_sdk::{
-    Address, Env, String, Symbol, TryFromVal, TryIntoVal, Val, Vec,
+    contract, contractimpl, Address, BytesN, Env, String, Symbol, TryFromVal, TryIntoVal, Val, Vec,
 };
 
-use crate::{Error, FeeReceipt, SecondaryFee, SecondaryFeeClient};
+use crate::{Error, FeeReceipt, RegistryAssignment, Sector, SecondaryFee, SecondaryFeeClient};
 
 fn parse_event(env: &Env, event: &soroban_sdk::xdr::ContractEvent) -> (Address, Vec<Val>, Val) {
     let contract_addr = match &event.contract_id {
@@ -464,5 +464,142 @@ fn test_uninitialized_calls_rejected() {
     assert_eq!(
         client.try_set_fee_bps(&admin, &100),
         Err(Ok(Error::NotInit))
+    );
+}
+
+// ── Listing fee ───────────────────────────────────────────────────────────────
+
+#[contract]
+struct MockInvoiceRegistry;
+
+#[contractimpl]
+impl MockInvoiceRegistry {
+    pub fn set_sector(env: Env, invoice_id: BytesN<32>, sector: Sector) {
+        env.storage().instance().set(
+            &invoice_id,
+            &RegistryAssignment {
+                invoice_id: invoice_id.clone(),
+                category: sector,
+                risk_tier: 0,
+            },
+        );
+    }
+
+    pub fn get_category(env: Env, invoice_id: BytesN<32>) -> RegistryAssignment {
+        env.storage().instance().get(&invoice_id).unwrap()
+    }
+}
+
+/// Fixture with a registry bound and a per-fraction fee of 10 for SMEs.
+fn setup_listing(env: &Env) -> (Fixture, BytesN<32>) {
+    let f = setup(env, 250);
+    let registry_id = env.register_contract(None, MockInvoiceRegistry);
+    let invoice = BytesN::from_array(env, &[7u8; 32]);
+    MockInvoiceRegistryClient::new(env, &registry_id).set_sector(&invoice, &Sector::Sme);
+    f.client.set_invoice_registry(&f.admin, &registry_id);
+    f.client.set_listing_fee(&f.admin, &Sector::Sme, &10);
+    (f, invoice)
+}
+
+#[test]
+fn test_get_listing_fee_uses_sector_rate() {
+    let env = Env::default();
+    let (f, invoice) = setup_listing(&env);
+
+    assert_eq!(f.client.get_listing_fee(&invoice, &1), 10);
+    assert_eq!(f.client.get_listing_fee(&invoice, &250), 2_500);
+
+    // A sector without a configured rate carries no listing fee.
+    f.client.set_listing_fee(&f.admin, &Sector::Sme, &0);
+    assert_eq!(f.client.get_listing_fee(&invoice, &250), 0);
+
+    assert_eq!(
+        f.client.try_get_listing_fee(&invoice, &0),
+        Err(Ok(Error::InvalidAmount))
+    );
+    assert_eq!(
+        f.client
+            .try_get_listing_fee(&BytesN::from_array(&env, &[8u8; 32]), &1),
+        Err(Ok(Error::InvoiceNotRegistered))
+    );
+}
+
+#[test]
+fn test_collect_listing_fee_routes_fee_to_treasury_and_emits_event() {
+    let env = Env::default();
+    let (f, invoice) = setup_listing(&env);
+    mint(&env, &f, &f.seller, 10_000);
+
+    let fee = f
+        .client
+        .collect_listing_fee(&f.market, &f.seller, &invoice, &250, &f.token);
+    assert_eq!(fee, 2_500);
+    assert_eq!(balance(&env, &f.token, &f.seller), 7_500);
+    assert_eq!(balance(&env, &f.token, &f.treasury), 2_500);
+
+    let mut found = false;
+    for e in env.events().all().events().iter() {
+        let (_, topics, data) = parse_event(&env, e);
+        let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if name == Symbol::new(&env, "ListingFeeCollected") {
+            found = true;
+            let inv: BytesN<32> = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            let seller: Address = topics.get(2).unwrap().try_into_val(&env).unwrap();
+            let (token, amount, fee_amount, _ts): (Address, i128, i128, u64) =
+                data.try_into_val(&env).unwrap();
+            assert_eq!(inv, invoice);
+            assert_eq!(seller, f.seller);
+            assert_eq!(token, f.token);
+            assert_eq!(amount, 250);
+            assert_eq!(fee_amount, 2_500);
+        }
+    }
+    assert!(found, "expected ListingFeeCollected event");
+}
+
+#[test]
+fn test_collect_listing_fee_rejected_when_seller_cannot_cover_fee() {
+    let env = Env::default();
+    let (f, invoice) = setup_listing(&env);
+    mint(&env, &f, &f.seller, 2_499);
+
+    let res = f
+        .client
+        .try_collect_listing_fee(&f.market, &f.seller, &invoice, &250, &f.token);
+    assert_eq!(res, Err(Ok(Error::InsufficientBalance)));
+    assert_eq!(balance(&env, &f.token, &f.seller), 2_499);
+    assert_eq!(balance(&env, &f.token, &f.treasury), 0);
+}
+
+#[test]
+fn test_collect_listing_fee_only_callable_by_market() {
+    let env = Env::default();
+    let (f, invoice) = setup_listing(&env);
+    mint(&env, &f, &f.seller, 10_000);
+
+    let impostor = Address::generate(&env);
+    let res = f
+        .client
+        .try_collect_listing_fee(&impostor, &f.seller, &invoice, &250, &f.token);
+    assert_eq!(res, Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
+fn test_listing_fee_setters_are_admin_only_and_reject_negative() {
+    let env = Env::default();
+    let (f, _invoice) = setup_listing(&env);
+    let impostor = Address::generate(&env);
+
+    assert_eq!(
+        f.client.try_set_listing_fee(&impostor, &Sector::Sme, &5),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert_eq!(
+        f.client.try_set_invoice_registry(&impostor, &impostor),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert_eq!(
+        f.client.try_set_listing_fee(&f.admin, &Sector::Sme, &-1),
+        Err(Ok(Error::InvalidAmount))
     );
 }

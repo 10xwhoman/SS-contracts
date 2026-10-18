@@ -2,7 +2,8 @@
 //!
 //! Whitelisted investors submit fraud flags against invoices. An admin
 //! resolves reports (confirmed / dismissed). All submissions and resolutions
-//! are recorded on-chain with events for audit trails.
+//! are recorded on-chain with events for audit trails. The first report filed
+//! against an invoice flags it as under review in the invoice registry.
 
 #![no_std]
 #![allow(clippy::too_many_arguments, deprecated)]
@@ -13,7 +14,7 @@ mod storage;
 mod test;
 mod types;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, IntoVal, String, Symbol, Vec};
 
 use errors::Error;
 use types::{Config, FraudReport, ReportOutcome, ReportStatus};
@@ -64,6 +65,21 @@ impl FraudRegistry {
         Ok(storage::is_whitelisted(&env, &investor))
     }
 
+    /// Admin-only: set the invoice registry that is told when an invoice
+    /// receives its first fraud report.
+    pub fn set_invoice_registry(env: Env, registry: Address) -> Result<(), Error> {
+        let config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        config.admin.require_auth();
+        storage::set_invoice_registry(&env, &registry);
+        Ok(())
+    }
+
+    /// View: the configured invoice registry.
+    pub fn get_invoice_registry(env: Env) -> Result<Address, Error> {
+        storage::get_config(&env).ok_or(Error::NotInit)?;
+        storage::get_invoice_registry(&env).ok_or(Error::RegistryNotSet)
+    }
+
     // ── Report lifecycle ───────────────────────────────────────────────
 
     /// Submit a fraud report against an invoice. Restricted to whitelisted
@@ -91,7 +107,18 @@ impl FraudRegistry {
 
         // Enforce one active report per wallet per invoice.
         if storage::get_active_report(&env, &invoice_id, &reporter).is_some() {
-            return Err(Error::ActiveReportExists);
+            return Err(Error::AlreadyReported);
+        }
+
+        // First report against this invoice: flag it as under review.
+        if storage::get_reports_by_invoice(&env, &invoice_id).is_empty() {
+            if let Some(registry) = storage::get_invoice_registry(&env) {
+                env.invoke_contract::<()>(
+                    &registry,
+                    &Symbol::new(&env, "mark_under_review"),
+                    (env.current_contract_address(), invoice_id.clone()).into_val(&env),
+                );
+            }
         }
 
         let report_id = storage::next_report_id(&env);
@@ -106,6 +133,7 @@ impl FraudRegistry {
             submitted: now,
             resolved: 0,
             resolver: None,
+            notes: String::from_str(&env, ""),
         };
         storage::set_report(&env, &report);
         storage::set_active_report(&env, &invoice_id, &reporter, report_id);
@@ -123,11 +151,23 @@ impl FraudRegistry {
         Ok(report_id)
     }
 
-    /// Admin-only: resolve a report as confirmed or dismissed.
+    /// Admin-only: resolve a report as confirmed or dismissed, without notes.
     pub fn resolve_report(
         env: Env,
         report_id: u32,
         outcome: ReportOutcome,
+    ) -> Result<(), Error> {
+        let notes = String::from_str(&env, "");
+        Self::review_report(env, report_id, outcome, notes)
+    }
+
+    /// Admin-only: review a report, recording the resolution (confirmed or
+    /// dismissed) together with the admin's resolution notes.
+    pub fn review_report(
+        env: Env,
+        report_id: u32,
+        resolution: ReportOutcome,
+        notes: String,
     ) -> Result<(), Error> {
         let config = storage::get_config(&env).ok_or(Error::NotInit)?;
         config.admin.require_auth();
@@ -137,13 +177,14 @@ impl FraudRegistry {
             return Err(Error::AlreadyResolved);
         }
 
-        let new_status = match outcome {
+        let new_status = match resolution {
             ReportOutcome::Confirmed => ReportStatus::Confirmed,
             ReportOutcome::Dismissed => ReportStatus::Dismissed,
         };
         report.status = new_status;
         report.resolved = env.ledger().timestamp();
         report.resolver = Some(config.admin.clone());
+        report.notes = notes.clone();
         storage::set_report(&env, &report);
 
         // Clear the active-report lock so the reporter can file a new one if needed.
@@ -155,6 +196,7 @@ impl FraudRegistry {
             &report.invoice,
             &config.admin,
             new_status as u32,
+            &notes,
             report.resolved,
         );
         Ok(())

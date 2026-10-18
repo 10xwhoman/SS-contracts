@@ -2,7 +2,7 @@
 
 use soroban_sdk::{Address, Env};
 
-use crate::types::StorageKey;
+use crate::types::{Sector, StorageKey};
 
 /// Ledgers below which the instance entry's TTL is extended (~7 days at 5s/ledger).
 pub const TTL_THRESHOLD: u32 = 120_960;
@@ -60,4 +60,31 @@ pub fn set_secondary_market(env: &Env, market: &Address) {
 pub fn get_secondary_market(env: &Env) -> Option<Address> {
     bump_instance(env);
     env.storage().instance().get(&StorageKey::SecondaryMarket)
+}
+
+pub fn set_invoice_registry(env: &Env, registry: &Address) {
+    env.storage()
+        .instance()
+        .set(&StorageKey::InvoiceRegistry, registry);
+    bump_instance(env);
+}
+
+pub fn get_invoice_registry(env: &Env) -> Option<Address> {
+    bump_instance(env);
+    env.storage().instance().get(&StorageKey::InvoiceRegistry)
+}
+
+pub fn set_listing_fee(env: &Env, sector: Sector, fee_per_fraction: i128) {
+    env.storage()
+        .instance()
+        .set(&StorageKey::ListingFee(sector), &fee_per_fraction);
+    bump_instance(env);
+}
+
+pub fn get_listing_fee(env: &Env, sector: Sector) -> i128 {
+    bump_instance(env);
+    env.storage()
+        .instance()
+        .get(&StorageKey::ListingFee(sector))
+        .unwrap_or(0)
 }

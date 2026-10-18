@@ -159,6 +159,60 @@ impl InvoiceRegistry {
         Ok(())
     }
 
+    /// Admin-only: bind the contract (e.g. the fraud registry) allowed to flag
+    /// invoices as under review.
+    pub fn set_review_authority(
+        env: Env,
+        admin: Address,
+        authority: Address,
+    ) -> Result<(), Error> {
+        let stored_admin = storage::get_admin(&env).ok_or(Error::NotInit)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        ensure_non_zero_address(&env, &authority)?;
+        admin.require_auth();
+        storage::set_review_authority(&env, &authority);
+        Ok(())
+    }
+
+    /// Review-authority-only: flag an invoice as under review.
+    pub fn mark_under_review(
+        env: Env,
+        caller: Address,
+        invoice_id: BytesN<32>,
+    ) -> Result<(), Error> {
+        storage::get_admin(&env).ok_or(Error::NotInit)?;
+        if storage::get_review_authority(&env) != Some(caller.clone()) {
+            return Err(Error::Unauthorized);
+        }
+        caller.require_auth();
+        storage::set_under_review(&env, &invoice_id, true);
+        events::invoice_under_review(&env, &invoice_id, &caller);
+        Ok(())
+    }
+
+    /// Admin-only: clear an invoice's under-review flag.
+    pub fn clear_under_review(
+        env: Env,
+        admin: Address,
+        invoice_id: BytesN<32>,
+    ) -> Result<(), Error> {
+        let stored_admin = storage::get_admin(&env).ok_or(Error::NotInit)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        admin.require_auth();
+        storage::set_under_review(&env, &invoice_id, false);
+        events::invoice_review_cleared(&env, &invoice_id);
+        Ok(())
+    }
+
+    /// View: whether an invoice is flagged as under review.
+    pub fn is_under_review(env: Env, invoice_id: BytesN<32>) -> bool {
+        storage::is_under_review(&env, &invoice_id)
+    }
+
     /// View: return the current admin.
     pub fn get_admin(env: Env) -> Result<Address, Error> {
         storage::get_admin(&env).ok_or(Error::NotInit)

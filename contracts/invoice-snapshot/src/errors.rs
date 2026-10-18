@@ -19,4 +19,6 @@ pub enum Error {
     SnapshotNotFound = 6,
     /// Arithmetic overflow.
     Overflow = 7,
+    /// The snapshot holds no balances to distribute against.
+    NothingToDistribute = 8,
 }

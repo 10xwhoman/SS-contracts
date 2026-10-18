@@ -1,10 +1,10 @@
 //! Storage helpers: instance for config, persistent for escrow data, invoice records, and positions.
 
-use soroban_sdk::{Address, BytesN, Env, Symbol};
+use soroban_sdk::{Address, BytesN, Env, Symbol, Vec};
 
 use crate::types::{
     CategoryFeeSchedule, Config, DisputeData, EmergencyApprovals, EscrowData, InstallmentMilestone,
-    InvoiceCategory, InvoiceData, MultiSigConfig, SettlementProposal, StorageKey,
+    InvestmentRecord, InvoiceCategory, InvoiceData, MultiSigConfig, SettlementProposal, StorageKey,
 };
 
 /// Ledgers below which a persistent entry's TTL is extended (~7 days at 5s/ledger).
@@ -399,6 +399,64 @@ pub fn set_max_investors(env: &Env, count: u32) {
     env.storage()
         .instance()
         .set(&StorageKey::MaxInvestors, &count);
+}
+
+/// Get the configured FX oracle contract, if any.
+pub fn get_fx_oracle(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&StorageKey::FxOracle)
+}
+
+/// Set the FX oracle contract.
+pub fn set_fx_oracle(env: &Env, oracle: &Address) {
+    env.storage().instance().set(&StorageKey::FxOracle, oracle);
+}
+
+/// Get the payment token configured for a supported investment currency.
+pub fn get_currency_token(env: &Env, currency: &Symbol) -> Option<Address> {
+    env.storage()
+        .instance()
+        .get(&StorageKey::Currency(currency.clone()))
+}
+
+/// Set (`Some`) or remove (`None`) the payment token for an investment currency.
+pub fn set_currency_token(env: &Env, currency: &Symbol, token: Option<&Address>) {
+    let key = StorageKey::Currency(currency.clone());
+    match token {
+        Some(token) => env.storage().instance().set(&key, token),
+        None => env.storage().instance().remove(&key),
+    }
+}
+
+/// Get the multi-currency investment records for (invoice_id, investor).
+pub fn get_investment_records(
+    env: &Env,
+    inv_id: &BytesN<32>,
+    investor: &Address,
+) -> Vec<InvestmentRecord> {
+    let key = StorageKey::InvestRecords(inv_id.clone(), investor.clone());
+    let records = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    records
+}
+
+/// Append a multi-currency investment record for (invoice_id, investor).
+pub fn add_investment_record(
+    env: &Env,
+    inv_id: &BytesN<32>,
+    investor: &Address,
+    record: &InvestmentRecord,
+) {
+    let key = StorageKey::InvestRecords(inv_id.clone(), investor.clone());
+    let mut records = get_investment_records(env, inv_id, investor);
+    records.push_back(record.clone());
+    env.storage().persistent().set(&key, &records);
+    bump_persistent(env, &key);
 }
 
 // ── Issue #443: Pending param change storage ─────────────────────────────────

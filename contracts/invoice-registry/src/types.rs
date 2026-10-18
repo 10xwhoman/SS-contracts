@@ -12,6 +12,10 @@ pub enum StorageKey {
     Assignment(BytesN<32>),
     /// Persistent: ordered list of invoice IDs assigned to a category.
     CategoryIndex(InvoiceCategory),
+    /// Instance: contract allowed to flag invoices as under review.
+    ReviewAuthority,
+    /// Persistent: under-review flag for an invoice.
+    UnderReview(BytesN<32>),
 }
 
 /// Invoice sector classification tracked by the registry.

@@ -145,3 +145,17 @@ pub fn next_report_id(env: &Env) -> u32 {
     extend_instance(env);
     next
 }
+
+/// Load the invoice registry contract, if one is configured.
+pub fn get_invoice_registry(env: &Env) -> Option<Address> {
+    extend_instance(env);
+    env.storage().instance().get(&StorageKey::InvoiceRegistry)
+}
+
+/// Save the invoice registry contract.
+pub fn set_invoice_registry(env: &Env, registry: &Address) {
+    env.storage()
+        .instance()
+        .set(&StorageKey::InvoiceRegistry, registry);
+    extend_instance(env);
+}

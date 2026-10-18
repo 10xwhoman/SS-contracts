@@ -274,3 +274,35 @@ fn test_uninitialized_calls_rejected() {
     );
     assert_eq!(client.try_get_admin(), Err(Ok(Error::NotInit)));
 }
+
+#[test]
+fn test_mark_under_review_flags_invoice_and_admin_clears() {
+    let env = Env::default();
+    let (admin, client) = setup(&env);
+    let authority = Address::generate(&env);
+    let id = invoice_id(&env, 90);
+
+    assert!(!client.is_under_review(&id));
+    // No authority bound yet.
+    assert_eq!(
+        client.try_mark_under_review(&authority, &id),
+        Err(Ok(Error::Unauthorized))
+    );
+
+    client.set_review_authority(&admin, &authority);
+    client.mark_under_review(&authority, &id);
+    assert!(client.is_under_review(&id));
+
+    let impostor = Address::generate(&env);
+    assert_eq!(
+        client.try_mark_under_review(&impostor, &invoice_id(&env, 91)),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert_eq!(
+        client.try_clear_under_review(&impostor, &id),
+        Err(Ok(Error::Unauthorized))
+    );
+
+    client.clear_under_review(&admin, &id);
+    assert!(!client.is_under_review(&id));
+}
