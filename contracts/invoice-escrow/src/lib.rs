@@ -6,6 +6,7 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 
+mod buy_limit;
 mod errors;
 mod events;
 mod storage;
@@ -1991,6 +1992,7 @@ impl InvoiceEscrow {
             return Err(Error::NoPositionFound);
         }
         to.require_auth();
+        buy_limit::record_purchase(&env, &invoice_id, &to, position)?;
         if price > 0 {
             let token_client = token::Client::new(&env, &invoice.token);
             token_client.transfer(&to, &from, &price);
@@ -2008,6 +2010,34 @@ impl InvoiceEscrow {
         storage::set_investor_position(&env, &invoice_id, &to, new_buyer_pos);
         events::position_transferred(&env, &from, &to, invoice_id, position, price);
         Ok(())
+    }
+
+    /// Admin-only: cap how much of `invoice_id` one wallet may buy on the
+    /// secondary market (via `transfer_position`) within `window_seconds`.
+    pub fn set_buy_limit(
+        env: Env,
+        admin: Address,
+        invoice_id: BytesN<32>,
+        max_amount: i128,
+        window_seconds: u64,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+        let config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        if config.admin != admin {
+            return Err(Error::Unauthorized);
+        }
+        if max_amount <= 0 || window_seconds == 0 {
+            return Err(Error::InvalidAmount);
+        }
+        let limit = buy_limit::BuyLimit { max_amount, window_seconds };
+        buy_limit::set_limit(&env, &invoice_id, &limit);
+        Ok(())
+    }
+
+    /// Amount `wallet` may still buy of `invoice_id` in its current window
+    /// (`i128::MAX` when no limit is configured).
+    pub fn get_buy_remaining(env: Env, invoice_id: BytesN<32>, wallet: Address) -> i128 {
+        buy_limit::remaining(&env, &invoice_id, &wallet)
     }
 
     /// Finalise funding: transition Open->Funded when target reached, release proceeds to seller.
@@ -2423,6 +2453,8 @@ mod benchmarks;
 mod integration_test;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_buy_limit;
 
 // Modules added for batch resolution of #479, #480, #481
 pub mod insurance_pool;
