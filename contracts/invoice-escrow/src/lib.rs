@@ -1718,25 +1718,37 @@ impl InvoiceEscrow {
                     return Err(Error::InvalidAmount);
                 }
             }
+            let remaining = invoice
+                .funding_target
+                .checked_sub(invoice.total_raised)
+                .ok_or(Error::Overflow)?;
+            if remaining == 0 {
+                return Err(Error::InvalidInvoiceStatus);
+            }
+            let accepted = amount.min(remaining);
+            let returned = amount.checked_sub(accepted).ok_or(Error::Overflow)?;
             let new_total = invoice
                 .total_raised
-                .checked_add(amount)
+                .checked_add(accepted)
                 .ok_or(Error::Overflow)?;
-            if new_total > invoice.funding_target {
-                return Err(Error::InvalidAmount);
-            }
             let current = storage::get_investor_position(&env, &invoice_id, &investor);
-            let new_pos = current.checked_add(amount).ok_or(Error::Overflow)?;
+            let new_pos = current.checked_add(accepted).ok_or(Error::Overflow)?;
             if let Some(cap) = invoice.per_investor_cap {
                 if new_pos > cap {
                     return Err(Error::InvalidAmount);
                 }
             }
             let token_client = token::Client::new(&env, &invoice.token);
-            token_client.transfer(&investor, &env.current_contract_address(), &amount);
+            token_client.transfer(&investor, &env.current_contract_address(), &accepted);
+            if returned > 0 {
+                token_client.transfer(&env.current_contract_address(), &investor, &returned);
+            }
             storage::set_investor_position(&env, &invoice_id, &investor, new_pos);
             invoice.total_raised = new_total;
-            storage::set_invoice(&env, invoice_id, &invoice);
+            storage::set_invoice(&env, invoice_id.clone(), &invoice);
+            if returned > 0 {
+                events::partial_fill_executed(&env, &invoice_id, &investor, amount, accepted, returned);
+            }
             return Ok(());
         }
 
@@ -1753,13 +1765,19 @@ impl InvoiceEscrow {
             return Err(Error::FundingDeadlineNotPassed);
         }
 
+        let remaining = record
+            .funding_target
+            .checked_sub(record.total_raised)
+            .ok_or(Error::Overflow)?;
+        if remaining == 0 {
+            return Err(Error::InvalidInvoiceStatus);
+        }
+        let accepted = amount.min(remaining);
+        let returned = amount.checked_sub(accepted).ok_or(Error::Overflow)?;
         let new_raised = record
             .total_raised
-            .checked_add(amount)
+            .checked_add(accepted)
             .ok_or(Error::Overflow)?;
-        if new_raised > record.funding_target {
-            return Err(Error::InvalidAmount);
-        }
 
         let mut already_in = false;
         for existing in record.investors.iter() {
@@ -1782,7 +1800,7 @@ impl InvoiceEscrow {
         }
 
         let current_pos = storage::get_investor_position(&env, &invoice_id, &investor);
-        let new_pos = current_pos.checked_add(amount).ok_or(Error::Overflow)?;
+        let new_pos = current_pos.checked_add(accepted).ok_or(Error::Overflow)?;
         storage::set_investor_position(&env, &invoice_id, &investor, new_pos);
 
         record.total_raised = new_raised;
@@ -1791,7 +1809,25 @@ impl InvoiceEscrow {
         }
 
         storage::set_invoice_record(&env, &invoice_id, &record);
+        if returned > 0 {
+            events::partial_fill_executed(&env, &invoice_id, &investor, amount, accepted, returned);
+        }
         Ok(())
+    }
+
+    /// Return the amount still available for investment before the funding cap.
+    pub fn get_remaining_capacity(env: Env, invoice_id: BytesN<32>) -> Result<i128, Error> {
+        if let Some(invoice) = storage::get_invoice(&env, invoice_id.clone()) {
+            return invoice
+                .funding_target
+                .checked_sub(invoice.total_raised)
+                .ok_or(Error::Overflow);
+        }
+        let record = storage::get_invoice_record(&env, &invoice_id).ok_or(Error::EscrowNotFound)?;
+        record
+            .funding_target
+            .checked_sub(record.total_raised)
+            .ok_or(Error::Overflow)
     }
 
     /// Partially refund an investor's position before deadline.

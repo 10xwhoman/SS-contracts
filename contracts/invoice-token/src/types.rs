@@ -66,6 +66,8 @@ pub struct TokenMetadata {
     pub transfer_locked: bool,
     /// Emergency pause flag for sensitive token operations.
     pub paused: bool,
+    /// Optional lock-up contract consulted before holder transfers.
+    pub transfer_restriction: Option<soroban_sdk::Address>,
 }
 
 /// Allowance entry: amount and expiration ledger.
