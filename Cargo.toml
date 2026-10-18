@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "contracts/auto-invest",
     "contracts/batch-settlement",
+    "contracts/bulk-listing",
     "contracts/categorisation-registry",
     "contracts/fee-treasury",
     "contracts/interest-rate-oracle",
@@ -10,12 +11,15 @@ members = [
     "contracts/investor-notifications",
     "contracts/investor-scoring",
     "contracts/invoice-escrow",
+    "contracts/invoice-pool",
     "contracts/invoice-token",
+    "contracts/loyalty-tier",
     "contracts/nonce-registry",
     "contracts/order-book",
     "contracts/partial-settlement",
     "contracts/payment-distributor",
     "contracts/yield-accrual",
+    "contracts/yield-booster",
     "contracts/yield-vesting",
 ]
 
