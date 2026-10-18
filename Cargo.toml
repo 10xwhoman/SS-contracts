@@ -9,10 +9,10 @@ members = [
     "contracts/order-book",
     "contracts/partial-settlement",
     "contracts/payment-distributor",
-    "contracts/invoice-refund",
-    "contracts/invoice-maturity",
-    "contracts/invoice-snapshot",
-    "contracts/multisig-admin",
+    "contracts/investment-limit",
+    "contracts/investor-notifications",
+    "contracts/yield-accrual",
+    "contracts/interest-rate-oracle",
 ]
 
 [workspace.dependencies]
