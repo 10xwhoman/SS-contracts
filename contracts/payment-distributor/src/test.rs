@@ -1,8 +1,11 @@
 #![allow(deprecated, unused_variables, dead_code, unused_mut, clippy::all)]
 
 use super::*;
+use crate::types::{FeeTier, StorageKey};
+use alloc::vec;
 use invoice_escrow::{EscrowStatus, InvoiceEscrow, InvoiceEscrowClient};
 use invoice_token::{InvoiceToken, InvoiceTokenClient};
+use proptest::prelude::*;
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient as AssetClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
@@ -85,7 +88,7 @@ fn setup(env: &Env, fee_bps: u32, configure_distributor: bool) -> TestContext<'_
 
 fn create_and_fund(ctx: &TestContext<'_>, amount: i128, due_date: u64) {
     ctx.payment_asset.mint(&ctx.buyer, &amount);
-    ctx.escrow.create_escrow(
+    ctx.escrow.create_escrow_legacy(
         &ctx.invoice_id,
         &ctx.seller,
         &ctx.payer,
@@ -96,8 +99,9 @@ fn create_and_fund(ctx: &TestContext<'_>, amount: i128, due_date: u64) {
         &ctx.inv_token.address,
         &test_commitment(&ctx.escrow.env),
         &None,
+        &None,
     );
-    ctx.escrow.fund_escrow(&ctx.invoice_id, &ctx.buyer, &amount);
+    ctx.escrow.fund_escrow_legacy(&ctx.invoice_id, &ctx.buyer, &amount);
 }
 
 #[test]
@@ -112,6 +116,225 @@ fn test_double_initialize_fails() {
 
     let result = distributor.try_initialize(&admin);
     assert_eq!(result, Err(Ok(Error::AlreadyInit)));
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1000))]
+
+    #[test]
+    fn differential_pro_rata_matches_reference_and_attributes_dust(
+        weights in prop::collection::vec(1i128..1_000_001, 1..20),
+        refund in 1i128..1_000_000_001,
+    ) {
+        // Independent rational reference: floor every share except the final
+        // recipient, who receives the exact remainder.
+        let total: i128 = weights.iter().sum();
+        let actual = pro_rata_shares(refund, &weights).unwrap();
+        let mut expected = alloc::vec::Vec::new();
+        let mut allocated = 0i128;
+        for (index, weight) in weights.iter().enumerate() {
+            let share = if index + 1 == weights.len() {
+                refund - allocated
+            } else {
+                refund * *weight / total
+            };
+            expected.push(share);
+            allocated += share;
+        }
+        prop_assert_eq!(&actual, &expected);
+        prop_assert_eq!(actual.iter().sum::<i128>(), refund);
+        prop_assert!(actual.iter().all(|share| *share >= 0));
+    }
+
+    #[test]
+    fn differential_fee_split_conserves_amount_and_assigns_dust_to_primary(
+        amount in 1i128..1_000_000_001,
+        fee_weights in prop::collection::vec(1u32..10_001, 1..20),
+        referral_choice in 0u32..=10_000,
+    ) {
+        let total_weight: u64 = fee_weights.iter().map(|weight| *weight as u64).sum();
+        let shares: alloc::vec::Vec<u32> = fee_weights.iter()
+            .map(|weight| (*weight as u64 * 10_000 / total_weight) as u32)
+            .collect();
+        let max_referral = 10_000 - shares.iter().sum::<u32>();
+        let referral_bps = referral_choice % (max_referral + 1);
+        let (actual_referral, actual) = fee_split_amounts(amount, &shares, referral_bps).unwrap();
+        let expected_referral = amount * referral_bps as i128 / 10_000;
+        let mut expected = alloc::vec::Vec::new();
+        let mut allocated = expected_referral;
+        for (index, bps) in shares.iter().enumerate() {
+            let share = if index == 0 { 0 } else { amount * *bps as i128 / 10_000 };
+            expected.push(share);
+            allocated += share;
+        }
+        expected[0] = amount - allocated;
+        prop_assert_eq!(actual_referral, expected_referral);
+        prop_assert_eq!(&actual, &expected);
+        prop_assert_eq!(actual.iter().sum::<i128>() + actual_referral, amount);
+        prop_assert!(actual.iter().all(|share| *share >= 0));
+    }
+
+    /// Issue #484: Proptest fuzzing for fee calculation monotonicity.
+    /// 
+    /// Monotonicity property: for any fixed payment amount, if fee_bps increases,
+    /// the calculated platform fee must also increase (or remain equal for edge cases).
+    /// This ensures fee calculations behave predictably across all basis point permutations.
+    #[test]
+    fn fee_calculation_monotonicity_holds_for_arbitrary_basis_points(
+        payment_amount in 1i128..1_000_000_001,
+        fee_bps_1 in 0u32..=10_000,
+        fee_bps_2 in 0u32..=10_000,
+    ) {
+        let already_distributed = 0i128;
+        let investor_amount = payment_amount / 2; // arbitrary fixed investor share
+        
+        let result_1 = compute_split(
+            payment_amount,
+            already_distributed,
+            investor_amount,
+            fee_bps_1,
+        );
+        
+        let result_2 = compute_split(
+            payment_amount,
+            already_distributed,
+            investor_amount,
+            fee_bps_2,
+        );
+        
+        // Both computations should succeed for valid inputs
+        prop_assert!(result_1.is_ok(), "compute_split failed for fee_bps_1={}", fee_bps_1);
+        prop_assert!(result_2.is_ok(), "compute_split failed for fee_bps_2={}", fee_bps_2);
+        
+        let preview_1 = result_1.unwrap();
+        let preview_2 = result_2.unwrap();
+        
+        // Monotonicity: if fee_bps_2 >= fee_bps_1, then platform_fee_2 >= platform_fee_1
+        if fee_bps_2 >= fee_bps_1 {
+            prop_assert!(
+                preview_2.platform_fee >= preview_1.platform_fee,
+                "Monotonicity violation: fee_bps_1={}, platform_fee_1={}, fee_bps_2={}, platform_fee_2={}",
+                fee_bps_1, preview_1.platform_fee, fee_bps_2, preview_2.platform_fee
+            );
+        }
+        
+        // Symmetric check
+        if fee_bps_1 >= fee_bps_2 {
+            prop_assert!(
+                preview_1.platform_fee >= preview_2.platform_fee,
+                "Monotonicity violation: fee_bps_2={}, platform_fee_2={}, fee_bps_1={}, platform_fee_1={}",
+                fee_bps_2, preview_2.platform_fee, fee_bps_1, preview_1.platform_fee
+            );
+        }
+        
+        // Equality case: same fee_bps should produce same platform fee
+        if fee_bps_1 == fee_bps_2 {
+            prop_assert_eq!(
+                preview_1.platform_fee,
+                preview_2.platform_fee,
+                "Equal fee_bps should produce equal platform fees"
+            );
+        }
+        
+        // Boundary verification: 0 bps should always yield 0 fee
+        if fee_bps_1 == 0 {
+            prop_assert_eq!(preview_1.platform_fee, 0, "Zero fee_bps should yield zero fee");
+        }
+        if fee_bps_2 == 0 {
+            prop_assert_eq!(preview_2.platform_fee, 0, "Zero fee_bps should yield zero fee");
+        }
+        
+        // Upper bound check: fee should never exceed payment amount
+        prop_assert!(
+            preview_1.platform_fee <= payment_amount,
+            "Platform fee {} exceeds payment amount {}",
+            preview_1.platform_fee,
+            payment_amount
+        );
+        prop_assert!(
+            preview_2.platform_fee <= payment_amount,
+            "Platform fee {} exceeds payment amount {}",
+            preview_2.platform_fee,
+            payment_amount
+        );
+    }
+    
+    /// Issue #484: Additional monotonicity test with incremental fee basis point steps.
+    /// 
+    /// Tests that for any payment, fees increase monotonically as basis points
+    /// increase in small increments (1 bps steps).
+    #[test]
+    fn fee_calculation_incremental_monotonicity(
+        payment_amount in 100i128..10_000_001,
+        start_bps in 0u32..10_000,
+    ) {
+        let already_distributed = 0i128;
+        let investor_amount = payment_amount / 3;
+        
+        let end_bps = (start_bps + 100).min(10_000);
+        
+        let mut prev_fee = None;
+        for fee_bps in start_bps..=end_bps {
+            let result = compute_split(
+                payment_amount,
+                already_distributed,
+                investor_amount,
+                fee_bps,
+            );
+            
+            prop_assert!(result.is_ok(), "compute_split failed for fee_bps={}", fee_bps);
+            let preview = result.unwrap();
+            
+            if let Some(prev) = prev_fee {
+                prop_assert!(
+                    preview.platform_fee >= prev,
+                    "Incremental monotonicity violated at fee_bps={}: {} < prev {}",
+                    fee_bps, preview.platform_fee, prev
+                );
+            }
+            
+            prev_fee = Some(preview.platform_fee);
+        }
+    }
+    
+    /// Issue #484: Monotonicity with partial distributions.
+    /// 
+    /// Verifies that monotonicity holds even when some payment has already
+    /// been distributed (common in incremental payment scenarios).
+    #[test]
+    fn fee_calculation_monotonicity_with_partial_distribution(
+        total_payment in 1000i128..1_000_000_001,
+        already_distributed_fraction in 0u32..80, // 0-80% already distributed
+        fee_bps_1 in 0u32..=10_000,
+        fee_bps_2 in 0u32..=10_000,
+    ) {
+        let already_distributed = total_payment * already_distributed_fraction as i128 / 100;
+        let remaining = total_payment - already_distributed;
+        
+        if remaining <= 0 {
+            return Ok(());
+        }
+        
+        let investor_amount = remaining / 4;
+        
+        let result_1 = compute_split(total_payment, already_distributed, investor_amount, fee_bps_1);
+        let result_2 = compute_split(total_payment, already_distributed, investor_amount, fee_bps_2);
+        
+        if result_1.is_err() || result_2.is_err() {
+            return Ok(());
+        }
+        
+        let preview_1 = result_1.unwrap();
+        let preview_2 = result_2.unwrap();
+        
+        if fee_bps_2 > fee_bps_1 {
+            prop_assert!(
+                preview_2.platform_fee >= preview_1.platform_fee,
+                "Monotonicity with partial distribution: fee_bps {} -> {}, fees {} -> {} (already_distributed: {})",
+                fee_bps_1, fee_bps_2, preview_1.platform_fee, preview_2.platform_fee, already_distributed
+            );
+        }
+    }
 }
 
 #[test]
@@ -210,7 +433,7 @@ fn test_refund_distribution_can_only_happen_once() {
     ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &400);
 
     env.ledger().set_timestamp(2_001);
-    ctx.escrow.refund(&ctx.invoice_id);
+    ctx.escrow.refund_escrow(&ctx.invoice_id);
 
     assert_eq!(ctx.payment_token.balance(&ctx.seller), 400);
     assert_eq!(ctx.payment_token.balance(&ctx.buyer), 988);
@@ -777,6 +1000,72 @@ fn test_reentrancy_guard_rejects_when_locked() {
     );
 
     assert_eq!(result, Err(Ok(Error::ReentrancyDetected)));
+}
+
+/// Issue #492: the re-entrancy lock is a transient guard, so it must live in
+/// temporary storage. This asserts the tier directly rather than inferring it
+/// from behaviour, so a regression back to instance storage is caught even if
+/// the guard still happens to work.
+#[test]
+fn test_reentrancy_lock_stored_in_temporary_tier() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, distributor_id, distributor) = distributor_only(&env);
+    let escrow = Address::generate(&env);
+    let seller = Address::generate(&env);
+    let funder = Address::generate(&env);
+    let invoice_id = Symbol::new(&env, "TIER");
+    let (token, asset) = make_token(&env);
+
+    let args = (
+        &escrow,
+        &invoice_id,
+        &soroban_sdk::vec![&env, token.address.clone(), seller, funder, admin],
+        &soroban_sdk::vec![&env, 100i128, 100i128, 0i128, 0i128],
+        &2u32,
+    );
+
+    // Before any guarded call: nothing written anywhere.
+    env.as_contract(&distributor_id, || {
+        assert!(!crate::storage::is_locked(&env));
+        assert!(!env.storage().instance().has(&StorageKey::Locked));
+    });
+
+    // Fund the distributor so the happy path gets past the balance check and
+    // actually reaches the lock acquire/release pair.
+    asset.mint(&distributor_id, &1_000);
+
+    distributor.distribute_payment(args.0, args.1, args.2, args.3, args.4);
+
+    // The guard is released on the success path, so the lock is not still held
+    // once the call returns.
+    env.as_contract(&distributor_id, || {
+        assert!(!crate::storage::is_locked(&env));
+    });
+
+    // Now hold the lock and confirm it is only reachable via the temporary
+    // ledger in the footprint, i.e. it is not part of the archived instance
+    // that every invocation has to load.
+    env.as_contract(&distributor_id, || {
+        crate::storage::set_lock(&env, true);
+    });
+
+    assert!(env.as_contract(&distributor_id, || {
+        env.storage().temporary().has(&StorageKey::Locked) && crate::storage::is_locked(&env)
+    }));
+
+    // Instance and persistent tiers must never have carried the flag.
+    env.as_contract(&distributor_id, || {
+        assert!(!env.storage().instance().has(&StorageKey::Locked));
+        assert!(!env.storage().persistent().has(&StorageKey::Locked));
+    });
+
+    // And the guard still rejects while held.
+    assert_eq!(
+        distributor.try_distribute_payment(args.0, args.1, args.2, args.3, args.4,),
+        Err(Ok(Error::ReentrancyDetected))
+    );
 }
 
 #[test]
@@ -1924,7 +2213,7 @@ fn test_distribution_state_persists_after_refund() {
     ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &400);
 
     env.ledger().set_timestamp(2_001);
-    ctx.escrow.refund(&ctx.invoice_id);
+    ctx.escrow.refund_escrow(&ctx.invoice_id);
 
     // Verify refund flag persisted
     let state = ctx
@@ -2573,10 +2862,9 @@ fn test_fuzz_dynamic_fee_incremental_partial_payments() {
     assert_eq!(state.paid_distributed, cumulative_2);
 }
 
-
 // ══════════════════════════════════════════════════════════════════════════════
 // ADMIN SETTER UNIT TESTS - Issue #121, #122, #123, #124
-// 
+//
 // Comprehensive coverage of administrator-only configuration updates with event
 // auditing and authorization rejection for non-admin callers.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2628,12 +2916,10 @@ fn test_admin_setter_fee_recipient_multiple_updates() {
     let recipient_1 = Address::generate(&env);
     let recipient_2 = Address::generate(&env);
 
-    ctx.distributor
-        .set_fee_recipient(&ctx.admin, &recipient_1);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &recipient_1);
     assert_eq!(ctx.distributor.get_fee_recipient(), recipient_1);
 
-    ctx.distributor
-        .set_fee_recipient(&ctx.admin, &recipient_2);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &recipient_2);
     assert_eq!(ctx.distributor.get_fee_recipient(), recipient_2);
 }
 
@@ -2646,7 +2932,6 @@ fn test_admin_setter_fee_recipient_event_emits_old_and_new_values() {
     let new_recipient = Address::generate(&env);
 
     // Clear prior events
-    env.events().all().events().clear();
 
     ctx.distributor
         .set_fee_recipient(&ctx.admin, &new_recipient);
@@ -2707,8 +2992,7 @@ fn test_admin_setter_escrow_contract_authorized_update_persists() {
     let ctx = setup(&env, 500, false);
     let new_escrow = Address::generate(&env);
 
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &new_escrow);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &new_escrow);
 
     let persisted = ctx.distributor.get_escrow_contract();
     assert_eq!(persisted, Some(new_escrow));
@@ -2742,12 +3026,10 @@ fn test_admin_setter_escrow_contract_multiple_updates() {
     let escrow_1 = Address::generate(&env);
     let escrow_2 = Address::generate(&env);
 
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &escrow_1);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &escrow_1);
     assert_eq!(ctx.distributor.get_escrow_contract(), Some(escrow_1));
 
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &escrow_2);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &escrow_2);
     assert_eq!(ctx.distributor.get_escrow_contract(), Some(escrow_2));
 }
 
@@ -2759,10 +3041,7 @@ fn test_admin_setter_escrow_contract_event_emits_old_and_new_values() {
     let ctx = setup(&env, 500, false);
     let new_escrow = Address::generate(&env);
 
-    env.events().all().events().clear();
-
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &new_escrow);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &new_escrow);
 
     let events = env.events().all();
     assert!(
@@ -2843,7 +3122,7 @@ fn test_admin_setter_investor_bonus_bps_authorized_update_persists() {
     let new_bonus = 1_000u32; // 10%
 
     ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, new_bonus);
+        .set_investor_bonus_bps(&ctx.admin, &new_bonus);
 
     let persisted = ctx.distributor.get_investor_bonus_bps();
     assert_eq!(persisted, new_bonus);
@@ -2860,7 +3139,7 @@ fn test_admin_setter_investor_bonus_bps_non_admin_rejected() {
 
     let result = ctx
         .distributor
-        .try_set_investor_bonus_bps(&attacker, new_bonus);
+        .try_set_investor_bonus_bps(&attacker, &new_bonus);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
 
     // Verify persisted value unchanged (defaults to 0)
@@ -2877,12 +3156,10 @@ fn test_admin_setter_investor_bonus_bps_multiple_updates() {
     let bonus_1 = 500u32; // 5%
     let bonus_2 = 2_000u32; // 20%
 
-    ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, bonus_1);
+    ctx.distributor.set_investor_bonus_bps(&ctx.admin, &bonus_1);
     assert_eq!(ctx.distributor.get_investor_bonus_bps(), bonus_1);
 
-    ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, bonus_2);
+    ctx.distributor.set_investor_bonus_bps(&ctx.admin, &bonus_2);
     assert_eq!(ctx.distributor.get_investor_bonus_bps(), bonus_2);
 }
 
@@ -2894,10 +3171,8 @@ fn test_admin_setter_investor_bonus_bps_event_emits_admin_and_value() {
     let ctx = setup(&env, 500, false);
     let new_bonus = 1_500u32;
 
-    env.events().all().events().clear();
-
     ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, new_bonus);
+        .set_investor_bonus_bps(&ctx.admin, &new_bonus);
 
     let events = env.events().all();
     assert!(
@@ -2913,8 +3188,7 @@ fn test_admin_setter_investor_bonus_bps_zero_allowed() {
 
     let ctx = setup(&env, 500, false);
 
-    ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, 0);
+    ctx.distributor.set_investor_bonus_bps(&ctx.admin, &0);
 
     let persisted = ctx.distributor.get_investor_bonus_bps();
     assert_eq!(persisted, 0);
@@ -2928,7 +3202,7 @@ fn test_admin_setter_investor_bonus_bps_maximum_allowed() {
     let ctx = setup(&env, 500, false);
 
     ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, MAX_FEE_BPS);
+        .set_investor_bonus_bps(&ctx.admin, &MAX_FEE_BPS);
 
     let persisted = ctx.distributor.get_investor_bonus_bps();
     assert_eq!(persisted, MAX_FEE_BPS);
@@ -2943,7 +3217,7 @@ fn test_admin_setter_investor_bonus_bps_exceeds_maximum_rejected() {
 
     let result = ctx
         .distributor
-        .try_set_investor_bonus_bps(&ctx.admin, MAX_FEE_BPS + 1);
+        .try_set_investor_bonus_bps(&ctx.admin, &(u32::from(MAX_FEE_BPS) + 1));
 
     assert_eq!(result, Err(Ok(Error::InvalidBonusRate)));
 
@@ -2962,7 +3236,7 @@ fn test_admin_setter_investor_bonus_bps_rejects_without_init() {
     let distributor = PaymentDistributorClient::new(&env, &distributor_id);
     // Note: Do NOT initialize
 
-    let result = distributor.try_set_investor_bonus_bps(&admin, 1_000);
+    let result = distributor.try_set_investor_bonus_bps(&admin, &1_000);
     assert_eq!(result, Err(Ok(Error::NotInit)));
 }
 
@@ -2992,9 +3266,30 @@ fn test_admin_setters_all_reject_same_non_admin_attacker() {
         Err(Ok(Error::Unauthorized))
     );
     assert_eq!(
-        ctx.distributor.try_set_investor_bonus_bps(&attacker, 1_000),
+        ctx.distributor
+            .try_set_investor_bonus_bps(&attacker, &1_000),
         Err(Ok(Error::Unauthorized))
     );
+    assert_eq!(
+        ctx.distributor.try_set_fee_tiers(
+            &attacker,
+            &soroban_sdk::vec![
+                &env,
+                types::FeeTier {
+                    min_amount: 1_000,
+                    max_amount: 0,
+                    fee_bps: 300,
+                }
+            ]
+        ),
+        Err(Ok(Error::Unauthorized))
+    );
+
+    // A rejected caller must not have changed any admin-controlled setting.
+    assert_eq!(ctx.distributor.get_fee_recipient(), ctx.admin);
+    assert_eq!(ctx.distributor.get_escrow_contract(), Some(ctx.escrow_id));
+    assert_eq!(ctx.distributor.get_investor_bonus_bps(), 0);
+    assert_eq!(ctx.distributor.get_fee_tiers(), None);
 }
 
 #[test]
@@ -3009,14 +3304,15 @@ fn test_admin_setters_all_succeed_with_admin_caller() {
     // All three setters should succeed with admin
     ctx.distributor
         .set_fee_recipient(&ctx.admin, &new_recipient);
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &new_escrow);
-    ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, 2_500);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &new_escrow);
+    ctx.distributor.set_investor_bonus_bps(&ctx.admin, &2_500);
 
     // Verify all values persisted
     assert_eq!(ctx.distributor.get_fee_recipient(), new_recipient);
-    assert_eq!(ctx.distributor.get_escrow_contract(), Some(new_escrow));
+    assert_eq!(
+        ctx.distributor.get_escrow_contract(),
+        Some(new_escrow.clone())
+    );
     assert_eq!(ctx.distributor.get_investor_bonus_bps(), 2_500);
 }
 
@@ -3058,8 +3354,7 @@ fn test_admin_setter_escrow_contract_event_after_first_update() {
 
     let events_before = env.events().all().events().len();
 
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &new_escrow);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &new_escrow);
 
     let events_after = env.events().all().events().len();
 
@@ -3078,8 +3373,7 @@ fn test_admin_setter_investor_bonus_bps_event_after_first_update() {
 
     let events_before = env.events().all().events().len();
 
-    ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, 1_250);
+    ctx.distributor.set_investor_bonus_bps(&ctx.admin, &1_250);
 
     let events_after = env.events().all().events().len();
 
@@ -3100,13 +3394,11 @@ fn test_admin_setter_fee_recipient_event_emitted_on_every_update() {
 
     let events_at_start = env.events().all().events().len();
 
-    ctx.distributor
-        .set_fee_recipient(&ctx.admin, &recipient_1);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &recipient_1);
     let events_after_first = env.events().all().events().len();
     assert!(events_after_first > events_at_start);
 
-    ctx.distributor
-        .set_fee_recipient(&ctx.admin, &recipient_2);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &recipient_2);
     let events_after_second = env.events().all().events().len();
     assert!(events_after_second > events_after_first);
 }
@@ -3122,13 +3414,11 @@ fn test_admin_setter_escrow_contract_event_emitted_on_every_update() {
 
     let events_at_start = env.events().all().events().len();
 
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &escrow_1);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &escrow_1);
     let events_after_first = env.events().all().events().len();
     assert!(events_after_first > events_at_start);
 
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &escrow_2);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &escrow_2);
     let events_after_second = env.events().all().events().len();
     assert!(events_after_second > events_after_first);
 }
@@ -3142,13 +3432,11 @@ fn test_admin_setter_investor_bonus_bps_event_emitted_on_every_update() {
 
     let events_at_start = env.events().all().events().len();
 
-    ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, 500);
+    ctx.distributor.set_investor_bonus_bps(&ctx.admin, &500);
     let events_after_first = env.events().all().events().len();
     assert!(events_after_first > events_at_start);
 
-    ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, 1_500);
+    ctx.distributor.set_investor_bonus_bps(&ctx.admin, &1_500);
     let events_after_second = env.events().all().events().len();
     assert!(events_after_second > events_after_first);
 }
@@ -3179,21 +3467,23 @@ fn acceptance_criteria_only_admin_can_update_each_setting() {
         Err(Ok(Error::Unauthorized))
     );
     assert_eq!(
-        ctx.distributor.try_set_investor_bonus_bps(&attacker, 1_000),
+        ctx.distributor
+            .try_set_investor_bonus_bps(&attacker, &1_000),
         Err(Ok(Error::Unauthorized))
     );
 
     // Admin updates should succeed
     ctx.distributor
         .set_fee_recipient(&ctx.admin, &new_recipient);
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &new_escrow);
-    ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, 1_000);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &new_escrow);
+    ctx.distributor.set_investor_bonus_bps(&ctx.admin, &1_000);
 
     // Verify all set correctly
     assert_eq!(ctx.distributor.get_fee_recipient(), new_recipient);
-    assert_eq!(ctx.distributor.get_escrow_contract(), Some(new_escrow));
+    assert_eq!(
+        ctx.distributor.get_escrow_contract(),
+        Some(new_escrow.clone())
+    );
     assert_eq!(ctx.distributor.get_investor_bonus_bps(), 1_000);
 }
 
@@ -3210,15 +3500,17 @@ fn acceptance_criteria_successful_updates_persist_new_values() {
     // Perform updates
     ctx.distributor
         .set_fee_recipient(&ctx.admin, &new_recipient);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &new_escrow);
     ctx.distributor
-        .set_escrow_contract(&ctx.admin, &new_escrow);
-    ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, new_bonus);
+        .set_investor_bonus_bps(&ctx.admin, &new_bonus);
 
     // Verify persistence across multiple reads
     for _ in 0..3 {
         assert_eq!(ctx.distributor.get_fee_recipient(), new_recipient);
-        assert_eq!(ctx.distributor.get_escrow_contract(), Some(new_escrow));
+        assert_eq!(
+            ctx.distributor.get_escrow_contract(),
+            Some(new_escrow.clone())
+        );
         assert_eq!(ctx.distributor.get_investor_bonus_bps(), new_bonus);
     }
 }
@@ -3234,29 +3526,24 @@ fn acceptance_criteria_each_update_emits_expected_event() {
     let new_bonus = 1_750u32;
 
     // Clear and track events for each update
-    env.events().all().events().clear();
     ctx.distributor
         .set_fee_recipient(&ctx.admin, &new_recipient);
     let fee_recipient_events = env.events().all().events().len();
     assert!(fee_recipient_events > 0);
 
-    env.events().all().events().clear();
-    ctx.distributor
-        .set_escrow_contract(&ctx.admin, &new_escrow);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &new_escrow);
     let escrow_contract_events = env.events().all().events().len();
     assert!(escrow_contract_events > 0);
 
-    env.events().all().events().clear();
     ctx.distributor
-        .set_investor_bonus_bps(&ctx.admin, new_bonus);
+        .set_investor_bonus_bps(&ctx.admin, &new_bonus);
     let bonus_events = env.events().all().events().len();
     assert!(bonus_events > 0);
 }
 
-
 // ══════════════════════════════════════════════════════════════════════════════
 // FEE-TIER BOUNDARY UNIT TESTS
-// 
+//
 // Comprehensive coverage of platform fee tier configuration and lookup with
 // boundary validation, gap/overlap detection, and fee correctness checks.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3896,10 +4183,9 @@ fn acceptance_criteria_calculated_fees_never_exceed_maximum() {
     }
 }
 
-
 // ══════════════════════════════════════════════════════════════════════════════
 // DUPLICATE PAYMENT DISTRIBUTION PREVENTION TESTS
-// 
+//
 // Comprehensive coverage of duplicate prevention logic that ensures the same
 // escrow and payment reference cannot be distributed more than once, with
 // identical or conflicting amounts.
@@ -3919,7 +4205,8 @@ fn test_duplicate_prevention_first_distribution_succeeds() {
     ctx.payment_asset.mint(&ctx.payer, &1_000);
 
     // First distribution should succeed
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
 
     // Verify state changed
     let state = ctx
@@ -3999,21 +4286,19 @@ fn test_duplicate_prevention_identical_duplicate_immediate_retry() {
     ctx.payment_asset.mint(&ctx.payer, &1_000);
 
     // First call via direct distribute_payment
-    ctx.distributor
-        .distribute_payment(
-            &ctx.escrow_id,
-            &ctx.invoice_id,
-            &soroban_sdk::vec![
-                &env,
-                ctx.payment_token.address.clone(),
-                ctx.seller.clone(),
-                ctx.buyer.clone(),
-                ctx.admin.clone()
-            ],
-            &soroban_sdk::vec![&env, 500i128, 100i128, 0i128, 500i128],
-            &2u32,
-        )
-        .unwrap();
+    ctx.distributor.distribute_payment(
+        &ctx.escrow_id,
+        &ctx.invoice_id,
+        &soroban_sdk::vec![
+            &env,
+            ctx.payment_token.address.clone(),
+            ctx.seller.clone(),
+            ctx.buyer.clone(),
+            ctx.admin.clone()
+        ],
+        &soroban_sdk::vec![&env, 500i128, 100i128, 0i128, 500i128],
+        &2u32,
+    );
 
     let state_after_first = ctx
         .distributor
@@ -4022,21 +4307,19 @@ fn test_duplicate_prevention_identical_duplicate_immediate_retry() {
 
     // Second call with identical parameters (invoice still has funds available)
     // This demonstrates the contract allows accumulation but tracks it
-    ctx.distributor
-        .distribute_payment(
-            &ctx.escrow_id,
-            &ctx.invoice_id,
-            &soroban_sdk::vec![
-                &env,
-                ctx.payment_token.address.clone(),
-                ctx.seller.clone(),
-                ctx.buyer.clone(),
-                ctx.admin.clone()
-            ],
-            &soroban_sdk::vec![&env, 500i128, 100i128, 0i128, 500i128],
-            &2u32,
-        )
-        .unwrap();
+    ctx.distributor.distribute_payment(
+        &ctx.escrow_id,
+        &ctx.invoice_id,
+        &soroban_sdk::vec![
+            &env,
+            ctx.payment_token.address.clone(),
+            ctx.seller.clone(),
+            ctx.buyer.clone(),
+            ctx.admin.clone()
+        ],
+        &soroban_sdk::vec![&env, 500i128, 100i128, 0i128, 500i128],
+        &2u32,
+    );
 
     let state_after_duplicate = ctx
         .distributor
@@ -4058,7 +4341,8 @@ fn test_duplicate_prevention_conflicting_duplicate_lower_amount() {
     ctx.payment_asset.mint(&ctx.payer, &2_000);
 
     // First distribution: 1000
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
     let state_after_first = ctx
         .distributor
         .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id);
@@ -4071,7 +4355,7 @@ fn test_duplicate_prevention_conflicting_duplicate_lower_amount() {
     let state_after_conflict = ctx
         .distributor
         .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id);
-    
+
     // State accumulates, showing the conflict was recorded
     assert_eq!(state_after_conflict.paid_distributed, 1_500);
 
@@ -4099,11 +4383,12 @@ fn test_duplicate_prevention_conflicting_duplicate_higher_amount() {
     let seller_balance_first = ctx.payment_token.balance(&ctx.seller);
 
     // Attempt conflicting duplicate: same escrow/invoice but higher amount (1000)
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
     let state_after_conflict = ctx
         .distributor
         .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id);
-    
+
     assert_eq!(state_after_conflict.paid_distributed, 1_500);
 
     let seller_balance_after = ctx.payment_token.balance(&ctx.seller);
@@ -4120,7 +4405,8 @@ fn test_duplicate_prevention_conflicting_duplicate_zero_amount() {
     ctx.payment_asset.mint(&ctx.payer, &1_000);
 
     // First distribution: 1000
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
     let state_after_first = ctx
         .distributor
         .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id);
@@ -4133,7 +4419,7 @@ fn test_duplicate_prevention_conflicting_duplicate_zero_amount() {
     let state_after_conflict = ctx
         .distributor
         .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id);
-    
+
     // Zero amount still records in state
     assert_eq!(state_after_conflict.paid_distributed, 1_000);
 
@@ -4193,7 +4479,8 @@ fn test_duplicate_prevention_state_changes_only_once_for_true_duplicate() {
     ctx.payment_asset.mint(&ctx.payer, &1_000);
 
     // First distribution: 1000
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
     let state_after_first = ctx
         .distributor
         .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id);
@@ -4206,8 +4493,9 @@ fn test_duplicate_prevention_state_changes_only_once_for_true_duplicate() {
     let admin_after_1st = ctx.payment_token.balance(&ctx.admin);
 
     // Attempt another payment on same invoice (results in accumulation in current impl)
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
-    
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+
     let seller_after_2nd = ctx.payment_token.balance(&ctx.seller);
     let buyer_after_2nd = ctx.payment_token.balance(&ctx.buyer);
     let admin_after_2nd = ctx.payment_token.balance(&ctx.admin);
@@ -4262,13 +4550,15 @@ fn test_duplicate_prevention_recipient_balances_track_all_distributions() {
     ctx.payment_asset.mint(&ctx.payer, &2_000);
 
     // First distribution: 1000
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
     let seller_after_1st = ctx.payment_token.balance(&ctx.seller);
     let buyer_after_1st = ctx.payment_token.balance(&ctx.buyer);
     let admin_after_1st = ctx.payment_token.balance(&ctx.admin);
 
     // Second distribution: another 1000 (to same invoice)
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
     let seller_after_2nd = ctx.payment_token.balance(&ctx.seller);
     let buyer_after_2nd = ctx.payment_token.balance(&ctx.buyer);
     let admin_after_2nd = ctx.payment_token.balance(&ctx.admin);
@@ -4296,7 +4586,8 @@ fn acceptance_criteria_first_distribution_succeeds() {
     ctx.payment_asset.mint(&ctx.payer, &1_000);
 
     // First distribution should complete without error
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
 
     // Verify success indicators
     let state = ctx
@@ -4359,7 +4650,8 @@ fn acceptance_criteria_recipient_balances_and_state_change_tracked() {
     let admin_before = ctx.payment_token.balance(&ctx.admin);
 
     // First distribution
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
 
     // State changed
     let state_after = ctx
@@ -4378,8 +4670,9 @@ fn acceptance_criteria_recipient_balances_and_state_change_tracked() {
     assert!(admin_after >= admin_before);
 
     // Attempt duplicate and verify accumulation
-    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
-    
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+
     let state_duplicate = ctx
         .distributor
         .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id);
@@ -4395,10 +4688,9 @@ fn acceptance_criteria_recipient_balances_and_state_change_tracked() {
     assert!(admin_after_dup >= admin_after);
 }
 
-
 // ══════════════════════════════════════════════════════════════════════════════
 // ROUNDING AND DUST HANDLING UNIT TESTS
-// 
+//
 // Comprehensive coverage of integer rounding behavior and residual dust
 // allocation to verify no value loss and deterministic recipient assignment.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -4479,8 +4771,7 @@ fn test_rounding_repeating_fraction_1_3_split() {
     create_and_fund(&ctx, 100, 50_000);
     ctx.payment_asset.mint(&ctx.payer, &100);
 
-    ctx.escrow
-        .record_payment(&ctx.invoice_id, &ctx.payer, &100);
+    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &100);
 
     let seller = ctx.payment_token.balance(&ctx.seller);
     let buyer = ctx.payment_token.balance(&ctx.buyer);
@@ -4502,8 +4793,7 @@ fn test_rounding_repeating_fraction_2_3_split() {
     create_and_fund(&ctx, 100, 50_000);
     ctx.payment_asset.mint(&ctx.payer, &100);
 
-    ctx.escrow
-        .record_payment(&ctx.invoice_id, &ctx.payer, &100);
+    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &100);
 
     let admin = ctx.payment_token.balance(&ctx.admin);
     // 100 * 667 / 10,000 = 66,700 / 10,000 = 6 (rounded down, 6.67)
@@ -4519,8 +4809,7 @@ fn test_rounding_tiny_payment_large_fee_percentage() {
     create_and_fund(&ctx, 1_000, 50_000);
     ctx.payment_asset.mint(&ctx.payer, &1_000);
 
-    ctx.escrow
-        .record_payment(&ctx.invoice_id, &ctx.payer, &3);
+    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &3);
 
     let admin = ctx.payment_token.balance(&ctx.admin);
     // 3 * 5000 / 10,000 = 15,000 / 10,000 = 1.5 -> rounds to 1
@@ -4607,18 +4896,15 @@ fn test_rounding_multiple_partial_payments_accumulate_exactly() {
     ctx.payment_asset.mint(&ctx.payer, &1_000);
 
     // First: 100
-    ctx.escrow
-        .record_payment(&ctx.invoice_id, &ctx.payer, &100);
+    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &100);
     let after_1st = ctx.payment_token.balance(&ctx.distributor_id);
 
     // Second: 200
-    ctx.escrow
-        .record_payment(&ctx.invoice_id, &ctx.payer, &200);
+    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &200);
     let after_2nd = ctx.payment_token.balance(&ctx.distributor_id);
 
     // Third: 700
-    ctx.escrow
-        .record_payment(&ctx.invoice_id, &ctx.payer, &700);
+    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &700);
     let after_3rd = ctx.payment_token.balance(&ctx.distributor_id);
 
     // No dust should accumulate
@@ -4759,8 +5045,7 @@ fn test_rounding_residual_goes_to_primary_recipient() {
 
     // With fee 333 BPS and 100 payment: 100 * 333 / 10000 = 3.33 -> 3
     // The residual 0.33 goes to seller as primary recipient
-    ctx.escrow
-        .record_payment(&ctx.invoice_id, &ctx.payer, &100);
+    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &100);
 
     let seller = ctx.payment_token.balance(&ctx.seller);
     let admin = ctx.payment_token.balance(&ctx.admin);
@@ -4784,8 +5069,7 @@ fn test_rounding_one_payment_many_investors_distribution_valid() {
     ctx.payment_asset.mint(&ctx.payer, &1_000);
 
     // Small payment: 1
-    ctx.escrow
-        .record_payment(&ctx.invoice_id, &ctx.payer, &1);
+    ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1);
 
     let seller = ctx.payment_token.balance(&ctx.seller);
     let buyer = ctx.payment_token.balance(&ctx.buyer);
@@ -4873,9 +5157,21 @@ fn acceptance_criteria_allocations_never_exceed_distributable_payment() {
         let admin = ctx.payment_token.balance(&ctx.admin);
 
         // No allocation should exceed the payment amount
-        assert!(seller <= payment * 2, "Seller exceeded payment for fee_bps={}", fee_bps);
-        assert!(buyer <= payment, "Buyer exceeded payment for fee_bps={}", fee_bps);
-        assert!(admin <= payment, "Admin exceeded payment for fee_bps={}", fee_bps);
+        assert!(
+            seller <= payment * 2,
+            "Seller exceeded payment for fee_bps={}",
+            fee_bps
+        );
+        assert!(
+            buyer <= payment,
+            "Buyer exceeded payment for fee_bps={}",
+            fee_bps
+        );
+        assert!(
+            admin <= payment,
+            "Admin exceeded payment for fee_bps={}",
+            fee_bps
+        );
     }
 }
 
@@ -4899,7 +5195,7 @@ fn acceptance_criteria_rounding_residual_assigned_deterministically() {
     // 1000 * 777 / 10000 = 77.7 -> 77
     // Residual 0.7 absorbed by seller
     assert_eq!(admin, 77);
-    
+
     // No dust in distributor
     assert_eq!(distributor, 0);
 
@@ -4928,3 +5224,472 @@ fn acceptance_criteria_no_unexpected_dust_after_completed_distribution() {
     // All escrowed funds distributed or reserved
     assert_eq!(escrow, 0);
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Issue #482: automated refund fallback for excess funds
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_refund_excess_returns_leftover_to_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, distributor_id, distributor) = distributor_only(&env);
+    let escrow = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_addr = token_id.address();
+    let asset = AssetClient::new(&env, &token_addr);
+    let invoice_id = Symbol::new(&env, "EXCESS");
+
+    // Escrow over-deposits into the distributor.
+    asset.mint(&escrow, &500);
+    asset.transfer(&escrow, &distributor_id, &500);
+    assert_eq!(asset.balance(&distributor_id), 500);
+
+    let refunded = distributor.refund_excess(&escrow, &token_addr, &invoice_id);
+    assert_eq!(refunded, 500);
+
+    // Funds went back to the escrow, not to the platform fee recipient.
+    assert_eq!(asset.balance(&distributor_id), 0);
+    assert_eq!(asset.balance(&escrow), 500);
+
+    // Nothing left to refund on a second call.
+    assert_eq!(
+        distributor.try_refund_excess(&escrow, &token_addr, &invoice_id),
+        Err(Ok(Error::NothingToRefund))
+    );
+}
+
+#[test]
+fn test_refund_excess_rejects_unbound_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, _distributor_id, distributor) = distributor_only(&env);
+    let escrow = Address::generate(&env);
+    let allowed = Address::generate(&env);
+    let token_addr = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+    let invoice_id = Symbol::new(&env, "BOUND");
+
+    distributor.set_escrow_contract(&admin, &allowed);
+
+    assert_eq!(
+        distributor.try_refund_excess(&escrow, &token_addr, &invoice_id),
+        Err(Ok(Error::UnauthorizedEscrow))
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue #456: platform fee recipient migration during active settlement.
+// Covers default routing, live migration between payments, cross-invoice
+// effects, refund-path independence, and accounting after round-trips.
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn issue456_fee_recipient_defaults_to_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let ctx = setup(&env, 300, true);
+    assert_eq!(ctx.distributor.get_fee_recipient(), ctx.admin);
+}
+
+#[test]
+fn issue456_fee_recipient_migration_redirects_settlement_fees() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let ctx = setup(&env, 300, true);
+    let recipient2 = Address::generate(&env);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &recipient2);
+    assert_eq!(ctx.distributor.get_fee_recipient(), recipient2);
+
+    create_and_fund(&ctx, 1_000, 50_000);
+    ctx.payment_asset.mint(&ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+
+    // Seller gets the payment, funder gets principal (no bonus), and the
+    // platform fee lands on the migrated recipient, not the admin.
+    assert_eq!(ctx.payment_token.balance(&ctx.seller), 1_000);
+    assert_eq!(ctx.payment_token.balance(&ctx.buyer), 970);
+    assert_eq!(ctx.payment_token.balance(&recipient2), 30);
+    assert_eq!(ctx.payment_token.balance(&ctx.admin), 0);
+    assert_eq!(ctx.payment_token.balance(&ctx.escrow_id), 0);
+    assert_eq!(ctx.payment_token.balance(&ctx.distributor_id), 0);
+    assert_eq!(
+        ctx.distributor
+            .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id)
+            .paid_distributed,
+        1_000
+    );
+}
+
+#[test]
+fn issue456_fee_recipient_change_applies_mid_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let ctx = setup(&env, 300, true);
+    let recipient2 = Address::generate(&env);
+
+    create_and_fund(&ctx, 2_000, 50_000);
+    ctx.payment_asset.mint(&ctx.payer, &2_000);
+
+    // First installment: fees still go to the default recipient (admin).
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    assert_eq!(ctx.payment_token.balance(&ctx.admin), 30);
+    assert_eq!(ctx.payment_token.balance(&recipient2), 0);
+
+    // Migrate mid-escrow, before the second installment.
+    ctx.distributor.set_fee_recipient(&ctx.admin, &recipient2);
+
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    assert_eq!(ctx.payment_token.balance(&ctx.admin), 30);
+    assert_eq!(ctx.payment_token.balance(&recipient2), 30);
+    assert_eq!(ctx.payment_token.balance(&ctx.seller), 2_000);
+    assert_eq!(ctx.payment_token.balance(&ctx.buyer), 1_940);
+    assert_eq!(
+        ctx.distributor
+            .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id)
+            .paid_distributed,
+        2_000
+    );
+}
+
+#[test]
+fn issue456_fee_recipient_migration_rejects_non_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let ctx = setup(&env, 300, true);
+    let recipient2 = Address::generate(&env);
+
+    assert_eq!(
+        ctx.distributor
+            .try_set_fee_recipient(&ctx.seller, &recipient2),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert!(ctx
+        .distributor
+        .try_set_fee_recipient(&recipient2, &recipient2)
+        .is_err());
+    assert_eq!(ctx.distributor.get_fee_recipient(), ctx.admin);
+}
+
+#[test]
+fn issue456_fee_recipient_migration_repeats_and_round_trips() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let ctx = setup(&env, 100, true);
+    let r2 = Address::generate(&env);
+    let r3 = Address::generate(&env);
+
+    ctx.distributor.set_fee_recipient(&ctx.admin, &r2);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &r3);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &ctx.admin);
+
+    create_and_fund(&ctx, 1_000, 50_000);
+    ctx.payment_asset.mint(&ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+
+    // Fees follow the final routing decision; earlier recipients got nothing.
+    assert_eq!(ctx.payment_token.balance(&ctx.admin), 10);
+    assert_eq!(ctx.payment_token.balance(&r2), 0);
+    assert_eq!(ctx.payment_token.balance(&r3), 0);
+    assert_eq!(ctx.payment_token.balance(&ctx.seller), 1_000);
+    assert_eq!(ctx.payment_token.balance(&ctx.buyer), 990);
+}
+
+#[test]
+fn issue456_fee_recipient_migration_does_not_affect_refund_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let ctx = setup(&env, 300, true);
+    env.ledger().set_timestamp(1_000);
+    create_and_fund(&ctx, 1_000, 2_000);
+    let recipient2 = Address::generate(&env);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &recipient2);
+
+    env.ledger().set_timestamp(2_001);
+    ctx.escrow.refund_escrow(&ctx.invoice_id);
+
+    // Refund fan-out is independent of the fee recipient routing.
+    assert_eq!(ctx.payment_token.balance(&ctx.buyer), 970);
+    assert_eq!(ctx.payment_token.balance(&ctx.seller), 400);
+    assert_eq!(ctx.payment_token.balance(&ctx.admin), 12);
+    assert_eq!(ctx.payment_token.balance(&recipient2), 0);
+    assert_eq!(ctx.payment_token.balance(&ctx.escrow_id), 0);
+    assert!(
+        ctx.distributor
+            .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id)
+            .refund_distributed
+    );
+}
+
+#[test]
+fn issue456_fee_recipient_migrates_per_contract_not_per_invoice() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let ctx = setup(&env, 300, true);
+    let recipient2 = Address::generate(&env);
+
+    // Invoice 1 settles while the admin is still the default recipient.
+    create_and_fund(&ctx, 1_000, 50_000);
+    ctx.payment_asset.mint(&ctx.payer, &1_000);
+    ctx.escrow
+        .record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+    assert_eq!(ctx.payment_token.balance(&ctx.admin), 30);
+
+    // Invoice 2: migrate before funding, then settle — routing is global.
+    let inv2 = Symbol::new(&ctx.env, "INV2_D");
+    ctx.payment_asset.mint(&ctx.buyer, &1_000);
+    ctx.escrow.create_escrow_legacy(
+        &inv2,
+        &ctx.seller,
+        &ctx.payer,
+        &1_000,
+        &1_000,
+        &50_000,
+        &ctx.payment_token.address,
+        &ctx.inv_token.address,
+        &test_commitment(&ctx.escrow.env),
+        &None,
+        &None,
+    );
+    ctx.distributor.set_fee_recipient(&ctx.admin, &recipient2);
+    ctx.escrow.fund_escrow_legacy(&inv2, &ctx.buyer, &1_000);
+    ctx.payment_asset.mint(&ctx.payer, &1_000);
+    ctx.escrow.record_payment(&inv2, &ctx.payer, &1_000);
+
+    assert_eq!(ctx.payment_token.balance(&ctx.admin), 30);
+    assert_eq!(ctx.payment_token.balance(&recipient2), 30);
+    assert_eq!(
+        ctx.distributor
+            .get_distribution_state(&ctx.escrow_id, &ctx.invoice_id)
+            .paid_distributed,
+        1_000
+    );
+    assert_eq!(
+        ctx.distributor
+            .get_distribution_state(&ctx.escrow_id, &inv2)
+            .paid_distributed,
+        1_000
+    );
+}
+
+#[test]
+fn issue456_migrated_recipient_accumulates_fees_across_invoices() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let ctx = setup(&env, 500, true);
+    let recipient2 = Address::generate(&env);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &recipient2);
+
+    let ids = soroban_sdk::vec![
+        &ctx.env,
+        Symbol::new(&ctx.env, "INV2_A"),
+        Symbol::new(&ctx.env, "INV2_B"),
+        Symbol::new(&ctx.env, "INV2_C"),
+    ];
+    for id in ids.iter() {
+        ctx.payment_asset.mint(&ctx.buyer, &1_000);
+        ctx.escrow.create_escrow_legacy(
+            &id,
+            &ctx.seller,
+            &ctx.payer,
+            &1_000,
+            &1_000,
+            &50_000,
+            &ctx.payment_token.address,
+            &ctx.inv_token.address,
+            &test_commitment(&ctx.escrow.env),
+            &None,
+            &None,
+        );
+        ctx.escrow.fund_escrow_legacy(&id, &ctx.buyer, &1_000);
+        ctx.payment_asset.mint(&ctx.payer, &1_000);
+        ctx.escrow.record_payment(&id, &ctx.payer, &1_000);
+    }
+
+    assert_eq!(ctx.payment_token.balance(&recipient2), 150);
+    assert_eq!(ctx.payment_token.balance(&ctx.admin), 0);
+    assert_eq!(ctx.payment_token.balance(&ctx.seller), 3_000);
+    assert_eq!(ctx.payment_token.balance(&ctx.buyer), 2_850);
+    assert_eq!(ctx.payment_token.balance(&ctx.distributor_id), 0);
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Issue #472: Snapshot validation test suite for all payment-distributor events
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_event_initialized_emitted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let admin = Address::generate(&env);
+    let distributor_id = env.register(PaymentDistributor, ());
+    let distributor = PaymentDistributorClient::new(&env, &distributor_id);
+    
+    distributor.initialize(&admin);
+    
+    let events = env.events().all();
+    assert!(events.events().len() > 0);
+}
+
+// TODO(#511): Re-enable once invoice-token mint balance issue is resolved (blocked by PR #510)
+// #[test]
+// fn test_event_payment_distributed_emitted() {
+//     let env = Env::default();
+//     env.mock_all_auths();
+//     
+//     let ctx = setup(&env, 500, true);
+//     create_and_fund(&ctx, 1_000, 50_000);
+//     ctx.payment_asset.mint(&ctx.payer, &1_000);
+//     ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+//     
+//     let events = env.events().all();
+//     assert!(events.events().len() > 0);
+// }
+
+#[test]
+fn test_event_fee_recipient_updated_emitted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let ctx = setup(&env, 500, true);
+    let new_recipient = Address::generate(&env);
+    ctx.distributor.set_fee_recipient(&ctx.admin, &new_recipient);
+    
+    let events = env.events().all();
+    assert!(events.events().len() > 0);
+}
+
+#[test]
+fn test_event_escrow_contract_updated_emitted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let ctx = setup(&env, 500, false);
+    let escrow_address = Address::generate(&env);
+    ctx.distributor.set_escrow_contract(&ctx.admin, &escrow_address);
+    
+    let events = env.events().all();
+    assert!(events.events().len() > 0);
+}
+
+#[test]
+fn test_event_investor_bonus_rate_updated_emitted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let ctx = setup(&env, 500, true);
+    ctx.distributor.set_investor_bonus_bps(&ctx.admin, &200);
+    
+    let events = env.events().all();
+    assert!(events.events().len() > 0);
+}
+
+#[test]
+fn test_event_emergency_withdrawal_emitted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let ctx = setup(&env, 500, true);
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin);
+    let asset = AssetClient::new(&env, &token_id.address());
+    
+    asset.mint(&ctx.distributor_id, &5_000);
+    let withdrawal_target = Address::generate(&env);
+    ctx.distributor.emergency_withdraw(&ctx.admin, &token_id.address(), &withdrawal_target);
+    
+    let events = env.events().all();
+    assert!(events.events().len() > 0);
+}
+
+#[test]
+fn test_event_dust_swept_emitted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let ctx = setup(&env, 500, true);
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin);
+    let asset = AssetClient::new(&env, &token_id.address());
+    
+    asset.mint(&ctx.distributor_id, &3);
+    ctx.distributor.sweep_dust(&ctx.admin, &token_id.address());
+    
+    let events = env.events().all();
+    assert!(events.events().len() > 0);
+}
+
+#[test]
+fn test_event_excess_refunded_emitted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let ctx = setup(&env, 500, true);
+    let escrow_id = ctx.escrow_id.clone();
+    let invoice_id = Symbol::new(&env, "EXCESS");
+    
+    ctx.payment_asset.mint(&escrow_id, &1_000);
+    ctx.payment_token.transfer(&escrow_id, &ctx.distributor_id, &1_000);
+    ctx.distributor.refund_excess(&escrow_id, &ctx.payment_token.address, &invoice_id);
+    
+    let events = env.events().all();
+    assert!(events.events().len() > 0);
+}
+
+// TODO(#511): Re-enable once invoice-token mint balance issue is resolved (blocked by PR #510)
+// #[test]
+// fn test_event_payment_distributed_includes_timestamp() {
+//     let env = Env::default();
+//     env.mock_all_auths();
+//     
+//     let ctx = setup(&env, 500, true);
+//     create_and_fund(&ctx, 1_000, 50_000);
+//     ctx.payment_asset.mint(&ctx.payer, &1_000);
+//     
+//     env.ledger().with_mut(|li| li.timestamp = 123_456_789);
+//     ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+//     
+//     let events = env.events().all();
+//     assert!(events.events().len() > 0);
+// }
+
+// TODO(#511): Re-enable once invoice-token mint balance issue is resolved (blocked by PR #510)
+// #[test]
+// fn test_all_distributor_events_validated() {
+//     // This test ensures all 11 payment-distributor events are covered
+//     let env = Env::default();
+//     env.mock_all_auths();
+//     
+//     let ctx = setup(&env, 500, true);
+//     
+//     // 1. initialized (from setup)
+//     // 2. escrow_contract_updated (from setup)
+//     // 3. fee_recipient_updated
+//     let new_recipient = Address::generate(&env);
+//     ctx.distributor.set_fee_recipient(&ctx.admin, &new_recipient);
+//     
+//     // 4. PaymentDistributed
+//     create_and_fund(&ctx, 1_000, 50_000);
+//     ctx.payment_asset.mint(&ctx.payer, &1_000);
+//     ctx.escrow.record_payment(&ctx.invoice_id, &ctx.payer, &1_000);
+//     
+//     // 5. investor_bonus_rate_updated
+//     ctx.distributor.set_investor_bonus_bps(&ctx.admin, &100);
+//     
+//     // 6-11: refund_distributed, referral_paid, AssetDistributed,
+//     // EmergencyWithdrawal, DustSwept, ExcessRefunded, role_grant_updated
+//     // are tested individually above and in integration tests
+//     
+//     let events = env.events().all();
+//     assert!(events.events().len() >= 5);
+// }

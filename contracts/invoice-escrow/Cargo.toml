@@ -2,6 +2,8 @@
 name = "invoice-escrow"
 version = "0.1.0"
 edition = "2021"
+# Deployed as WASM, never published to crates.io.
+publish = false
 description = "StellarSettle invoice escrow contract"
 
 [lib]
@@ -13,3 +15,5 @@ soroban-sdk = { workspace = true }
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 invoice-token = { path = "../invoice-token" }
+referral = { path = "../referral" }
+proptest = { workspace = true }

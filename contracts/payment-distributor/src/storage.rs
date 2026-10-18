@@ -50,15 +50,33 @@ pub fn get_escrow_contract(env: &Env) -> Option<Address> {
 }
 
 /// Re-entrancy guard flag accessors (Issue #127).
+///
+/// The guard is set on entry to a guarded entrypoint and cleared on exit, so it
+/// only ever needs to be observable *within* one invocation. It therefore lives
+/// in temporary storage rather than instance storage (issue #492):
+///
+///   * a re-entrant call necessarily happens in the same ledger, and temporary
+///     entries are alive for the whole of it, so the guard is fully effective
+///     for the case it exists to catch;
+///   * temporary entries are much cheaper than instance entries and are not
+///     part of the archived contract instance that every invocation has to
+///     load, so a flag that is meaningless between calls should not be paying
+///     rent there;
+///   * it is self-healing. If any path ever left the flag set, an instance flag
+///     would brick every guarded entrypoint until an admin manually intervened,
+///     because nothing would clear it. A temporary entry expires on its own.
+///
+/// Soroban rolls back all storage writes when an invocation returns an error,
+/// so a guard set on a path that then fails is cleared either way.
 pub fn is_locked(env: &Env) -> bool {
     env.storage()
-        .instance()
+        .temporary()
         .get(&StorageKey::Locked)
         .unwrap_or(false)
 }
 
 pub fn set_lock(env: &Env, locked: bool) {
-    env.storage().instance().set(&StorageKey::Locked, &locked);
+    env.storage().temporary().set(&StorageKey::Locked, &locked);
 }
 
 pub fn get_distribution(

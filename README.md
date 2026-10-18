@@ -72,6 +72,8 @@ CI releases: merges to `main` trigger [`.github/workflows/release.yml`](.github/
 
 ## 📚 Contract Documentation
 
+- [TypeScript contract error SDK](sdk/README.md) — exported error codes, TypeScript types, and JSON Schema.
+
 ### Invoice Escrow Contract
 ```rust
 // Create new invoice escrow
@@ -138,6 +140,28 @@ The script:
 4. Calls `initialize` on each contract with the configured arguments
 5. Calls `invoice-escrow.set_payment_distributor(...)` to enable distributor-based payouts
 6. Prints a summary of deployed contract IDs
+
+### 3c. Mock payment token (local integration testing)
+
+To exercise a flow locally you need a payment asset, and the only one the
+existing smoke test accepts is a real USDC contract address. `deploy-mock-token.sh`
+deploys a throwaway SEP-41 equivalent in one command, with no dependency on the
+escrow, invoice token, or distributor:
+
+```bash
+# Local standalone network
+MOCK_TOKEN_SECRET_KEY=S... bash scripts/deploy-mock-token.sh
+
+# Print the commands without touching the network
+bash scripts/deploy-mock-token.sh --dry-run
+```
+
+It deploys the repo's own `invoice-token` WASM as the mock, initialises it, mints
+a balance to the deployer plus any `MOCK_TOKEN_RECIPIENTS` you pass as
+`addr:amount` pairs, prints the contract ID, and writes it to
+`target/mock-token-id.txt`.
+
+The mock is publicly mintable, so the script refuses to deploy one to mainnet.
 
 ### 3b. PowerShell (Windows)
 

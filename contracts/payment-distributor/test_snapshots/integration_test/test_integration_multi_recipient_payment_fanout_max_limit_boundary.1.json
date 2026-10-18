@@ -383,6 +383,12 @@
                         "map": [
                           {
                             "key": {
+                              "symbol": "accreditation_callback"
+                            },
+                            "val": "void"
+                          },
+                          {
+                            "key": {
                               "symbol": "admin"
                             },
                             "val": {
@@ -391,10 +397,26 @@
                           },
                           {
                             "key": {
+                              "symbol": "dispute_timeout_secs"
+                            },
+                            "val": {
+                              "u64": "604800"
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "fee_bps"
                             },
                             "val": {
                               "u32": 1000
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "grace_period_seconds"
+                            },
+                            "val": {
+                              "u64": "0"
                             }
                           },
                           {
@@ -423,6 +445,14 @@
                           },
                           {
                             "key": {
+                              "symbol": "penalty_interest_bps"
+                            },
+                            "val": {
+                              "u32": 0
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "whitelist_enabled"
                             },
                             "val": {
@@ -439,7 +469,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 1036800
       },
       {
         "entry": {
@@ -515,6 +545,30 @@
             "contract_data": {
               "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "Locked"
+                  }
+                ]
+              },
+              "durability": "temporary",
+              "val": {
+                "bool": false
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 15
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
               "key": "ledger_key_contract_instance",
               "durability": "persistent",
               "val": {
@@ -545,18 +599,6 @@
                       },
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "Locked"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "bool": false
                       }
                     }
                   ]
@@ -1642,7 +1684,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 1036800
       }
     ]
   },

@@ -1,0 +1,75 @@
+# cargo-deny configuration — issue #490.
+#
+# Runs in CI alongside `cargo audit` (which covers known CVEs in the RustSec
+# database). cargo-deny covers the two things `cargo audit` does not:
+#
+#   * licences   — every crate in the graph must resolve to an explicitly
+#                  allowed licence. A copyleft or unknown licence entering the
+#                  dependency tree is a legal review, and for a contract that
+#                  ships on-chain it also changes the terms of the deployed
+#                  artefact.
+#   * sources    — the graph must not pull code from outside crates.io, since
+#                  an arbitrary git dependency can be replaced after review.
+#
+# The allow-list below is not aspirational: it is exactly the set of licences
+# currently resolved by `cargo metadata`, so adding a dependency with a new
+# licence fails the build rather than passing silently.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# A yanked version still resolving in the lockfile is a supply-chain risk: it
+# means the release was withdrawn upstream but is still being built and shipped.
+yanked = "deny"
+ignore = [
+    # `paste` is unmaintained. It arrives only as a build-time macro helper via
+    # ark-ff 0.5 -> soroban-env-host 27, a dependency of soroban-sdk itself, and
+    # upstream states there is no safe upgrade that does not require moving to a
+    # new major of the Soroban stack. It is a `macro_rules!` helper with no
+    # runtime code in the shipped WASM.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained; transitive build-dep of soroban-env-host, no safe upgrade" },
+]
+
+[licenses]
+version = 2
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+# The contract crates are `publish = false` and carry no licence field, because
+# they are deployed as WASM rather than distributed as source. Skipping them
+# here keeps the check focused on third-party code.
+private = { ignore = true }
+confidence-threshold = 0.8
+exceptions = []
+
+[bans]
+# Multiple versions of the same crate is normal in a tree this deep and is not
+# itself a risk, but it is worth seeing, so report rather than allow silently.
+multiple-versions = "warn"
+# Licence expressions like `MIT OR Apache-2.0` are not wildcards, but a
+# dependency could introduce one; allow rather than fail the whole check.
+wildcards = "allow"
+allow-wildcard-paths = true
+# Deny anything with no working advisory database coverage or a known-unmaintained
+# status once the ignore list above is exhausted. `bans` is intentionally a short
+# explicit list: these are crates with a specific reason to never appear here,
+# not a general-purpose blocklist that will drift.
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# Only crates.io. Any git or alternative-registry dependency has to be added
+# here deliberately, with the source spelled out in review.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

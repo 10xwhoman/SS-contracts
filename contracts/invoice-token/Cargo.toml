@@ -2,6 +2,8 @@
 name = "invoice-token"
 version = "0.1.0"
 edition = "2021"
+# Deployed as WASM, never published to crates.io.
+publish = false
 description = "StellarSettle invoice tokenization (SEP-41) contract"
 
 [lib]

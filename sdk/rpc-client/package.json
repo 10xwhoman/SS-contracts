@@ -1,0 +1,28 @@
+{
+  "name": "@stellarstate/ss-contracts-rpc",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "TypeScript RPC client for StellarSettle Soroban contracts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.js",
+    "test:integration": "npm run build && node --test test/integration/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^17.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.15",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@stellarstate/ss-contracts-sdk",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "TypeScript types and JSON Schema for StellarSettle contract errors",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schemas/contract-errors.json": "./schemas/contract-errors.schema.json"
+  },
+  "files": ["dist", "schemas"],
+  "scripts": {
+    "generate": "node scripts/generate-errors.mjs",
+    "build": "npm run generate && tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

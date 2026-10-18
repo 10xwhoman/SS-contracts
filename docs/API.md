@@ -74,9 +74,9 @@ The `payment-distributor` contract now implements the settlement/refund fan-out 
 
 ### Core Functions
 - `initialize(admin: Address, platform_fee_bps: u32)`
-- `create_escrow(invoice_id, seller, amount, due_date, payment_token, invoice_token)`
+- `create_escrow(..., accepted_tokens)`
 - `cancel_escrow(invoice_id, seller)`
-- `fund_escrow(invoice_id, buyer)`
+- `fund_escrow(invoice_id, buyer, amount, funding_token)`
 - `record_payment(invoice_id, payer, amount)`
 - `refund(invoice_id)`
 - `set_installment_schedule(invoice_id, seller, schedule)`
@@ -95,7 +95,7 @@ The `payment-distributor` contract now implements the settlement/refund fan-out 
 - If `payment_distributor` is configured, `refund` transfers the remaining collateral into the distributor and invokes `distribute_refund`.
 - If no distributor is configured, escrow falls back to the legacy direct-transfer path.
 ### `initialize(admin: Address, platform_fee_bps: u32)`
-### `create_escrow(invoice_id: Symbol, seller: Address, debtor: Address, face_value: i128, purchase_price: i128, due_date: u64, payment_token: Address, invoice_token: Address, commitment: BytesN<32>)`
+### `create_escrow(invoice_id: Symbol, seller: Address, debtor: Address, face_value: i128, purchase_price: i128, due_date: u64, payment_token: Address, invoice_token: Address, commitment: BytesN<32>, funding_milestone: Option<i128>, category: Option<InvoiceCategory>, accepted_tokens: Vec<Address>)`
 Creates an escrow for an invoice with the specified parameters.
 - **invoice_id**: Unique identifier for the invoice.
 - **seller**: Address of the invoice seller (creator of the escrow).
@@ -106,12 +106,21 @@ Creates an escrow for an invoice with the specified parameters.
 - **payment_token**: Address of the token used for payments.
 - **invoice_token**: Address of the invoice token contract.
 - **commitment**: SHA-256 hash of off-chain invoice data (immutable anchor).
+- **accepted_tokens**: Non-empty set of payment tokens that may fund the escrow; it must include `payment_token`.
+
+The first funding transaction selects and locks the escrow's payment token. Later funders must use that same token. `create_escrow_legacy` and `fund_escrow_legacy` preserve the former single-token behavior.
 
 **Constraints:**
 - face_value and purchase_price must be positive (> 0)
 - due_date must be non-zero and strictly greater than the current ledger timestamp
 - Each invoice_id can only be used once
-### `fund_escrow(invoice_id: Symbol, buyer: Address)`
+### `fund_escrow(invoice_id: Symbol, buyer: Address, amount: i128, funding_token: Address)`
+Funds the escrow with an accepted token. Once a contribution succeeds, every later funding, settlement, and refund uses that locked token.
+
+### Two-admin registered-invoice settlement
+`propose_settlement(admin, invoice_id, repayment_amount)` records a proposal from an admin in the configured emergency admin set. A different admin calls `approve_settlement(admin, invoice_id)` to execute the pro-rata investor settlement. The proposing admin receives `SameAdminApproval` if they try to approve their own proposal; successful execution clears the proposal.
+
+The legacy `settle_invoice(invoice_id, repayment_amount)` now creates a proposal on behalf of the configured contract admin and still requires a second admin's approval.
 ### `record_payment(invoice_id: Symbol, payer: Address, amount: i128)`
 Records a full or partial payment for a funded invoice.
 - **amount**: Must be $> 0$ and $\le$ (initial amount - total already paid).
@@ -152,3 +161,5 @@ Returns the first unsettled milestone, or `None` when no schedule exists or all 
 - `paused_updated`
 - `installment_schedule_set`
 - `installment_settled`
+- `settlement_proposed`
+- `settlement_approved`

@@ -1,0 +1,15 @@
+[package]
+name = "waitlist"
+version = "0.1.0"
+edition = "2021"
+description = "StellarSettle investor waitlist with KYC whitelist promotion"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+invoice-escrow = { path = "../invoice-escrow" }

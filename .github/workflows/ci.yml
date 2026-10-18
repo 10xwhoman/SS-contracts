@@ -13,6 +13,28 @@ env:
   CARGO_TERM_COLOR: always
   WASM_MAX_BYTES: 262144
 jobs:
+  typescript-sdk:
+    name: TypeScript SDK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Install SDK dependencies
+        run: npm ci
+        working-directory: sdk
+
+      - name: Build and test SDK
+        run: npm test
+        working-directory: sdk
+
   toolchain-sync:
     name: Toolchain Sync Check
     runs-on: ubuntu-latest
@@ -121,6 +143,19 @@ jobs:
 
       - name: Run cargo audit
         run: cargo audit
+
+  deny:
+    name: Licence & Source Policy (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+
+      - name: Check advisories, licences, bans and sources
+        run: cargo deny --all-features check
 
   wasm-size-check:
     name: WASM Size Regression Check

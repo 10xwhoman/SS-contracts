@@ -186,8 +186,7 @@ fn burn_on_settlement_emits_the_underlying_burn_event() {
 #[test]
 fn burn_from_on_settlement_happy_path_consumes_allowance_and_burns() {
     let h = Harness::new(1_000);
-    h.token
-        .approve(&h.investor, &h.escrow_id, &1_000, &1_000);
+    h.token.approve(&h.investor, &h.escrow_id, &1_000, &1_000);
 
     h.escrow_client()
         .burn_from_on_settlement(&h.token_id, &h.investor, &600);
@@ -199,11 +198,9 @@ fn burn_from_on_settlement_happy_path_consumes_allowance_and_burns() {
 #[test]
 fn burn_from_deducts_exactly_the_burned_amount_from_the_allowance() {
     let h = Harness::new(1_000);
-    h.token
-        .approve(&h.investor, &h.escrow_id, &1_000, &1_000);
+    h.token.approve(&h.investor, &h.escrow_id, &1_000, &1_000);
 
-    h.token
-        .burn_from(&h.escrow_id, &h.investor, &300);
+    h.token.burn_from(&h.escrow_id, &h.investor, &300);
 
     assert_eq!(h.token.allowance(&h.investor, &h.escrow_id), 700);
     assert_eq!(h.token.balance(&h.investor), 700);

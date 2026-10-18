@@ -1,0 +1,74 @@
+name: Automated PR Benchmark Comparison
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+      - master
+    paths:
+      - 'contracts/**'
+      - 'Cargo.*'
+      - '.github/workflows/benchmarks.yml'
+      - 'scripts/compare_benchmarks.py'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark-comparison:
+    name: Run and Compare Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Candidate Benchmarks (PR Branch)
+        id: pr_bench
+        run: |
+          echo "Running candidate benchmarks on PR branch..."
+          cargo test --package invoice-escrow -- benchmarks --nocapture > pr_benchmarks.txt 2>&1 || true
+          cat pr_benchmarks.txt | head -n 30
+
+      - name: Checkout Base Branch
+        run: |
+          echo "Checking out base ref: ${{ github.base_ref }}..."
+          git checkout ${{ github.base_ref }}
+
+      - name: Run Baseline Benchmarks (Base Branch)
+        id: base_bench
+        run: |
+          echo "Running baseline benchmarks on base branch..."
+          cargo test --package invoice-escrow -- benchmarks --nocapture > base_benchmarks.txt 2>&1 || true
+          cat base_benchmarks.txt | head -n 30
+
+      - name: Return to PR Branch
+        run: |
+          git checkout -f -
+
+      - name: Compare Benchmarks and Generate Step Summary
+        run: |
+          python3 scripts/compare_benchmarks.py \
+            --base base_benchmarks.txt \
+            --pr pr_benchmarks.txt \
+            --output benchmark_summary.md
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-comparison-report
+          path: |
+            benchmark_summary.md
+            pr_benchmarks.txt
+            base_benchmarks.txt

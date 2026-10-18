@@ -274,6 +274,12 @@
                         "map": [
                           {
                             "key": {
+                              "symbol": "accreditation_callback"
+                            },
+                            "val": "void"
+                          },
+                          {
+                            "key": {
                               "symbol": "admin"
                             },
                             "val": {
@@ -282,10 +288,26 @@
                           },
                           {
                             "key": {
+                              "symbol": "dispute_timeout_secs"
+                            },
+                            "val": {
+                              "u64": "604800"
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "fee_bps"
                             },
                             "val": {
                               "u32": 500
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "grace_period_seconds"
+                            },
+                            "val": {
+                              "u64": "0"
                             }
                           },
                           {
@@ -314,6 +336,14 @@
                           },
                           {
                             "key": {
+                              "symbol": "penalty_interest_bps"
+                            },
+                            "val": {
+                              "u32": 0
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "whitelist_enabled"
                             },
                             "val": {
@@ -330,7 +360,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 1036800
       },
       {
         "entry": {
@@ -770,7 +800,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 1036800
       }
     ]
   },

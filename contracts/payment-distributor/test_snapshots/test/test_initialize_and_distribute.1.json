@@ -254,6 +254,30 @@
             "contract_data": {
               "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "Locked"
+                  }
+                ]
+              },
+              "durability": "temporary",
+              "val": {
+                "bool": false
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 15
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
               "key": "ledger_key_contract_instance",
               "durability": "persistent",
               "val": {
@@ -284,18 +308,6 @@
                       },
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "Locked"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "bool": false
                       }
                     }
                   ]

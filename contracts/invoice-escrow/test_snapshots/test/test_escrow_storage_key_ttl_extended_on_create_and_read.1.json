@@ -247,6 +247,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "min_investment"
+                    },
+                    "val": {
+                      "i128": "0"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "paid_amt"
                     },
                     "val": {
@@ -353,6 +361,12 @@
                           {
                             "key": {
                               "symbol": "payment_distributor"
+                            },
+                            "val": "void"
+                          },
+                          {
+                            "key": {
+                              "symbol": "referral_contract"
                             },
                             "val": "void"
                           },
