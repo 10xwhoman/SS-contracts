@@ -1,9 +1,9 @@
 #![allow(deprecated)]
 //! Events emitted by the secondary market fee contract.
 
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{Address, BytesN, Env, Symbol};
 
-use crate::types::FeeReceipt;
+use crate::types::{FeeReceipt, Sector};
 
 /// Emitted when the contract is initialized.
 pub fn initialized(env: &Env, admin: &Address, treasury: &Address, fee_bps: u32) {
@@ -56,5 +56,40 @@ pub fn secondary_fee_collected(
             receipt.net_amount,
             env.ledger().timestamp(),
         ),
+    );
+}
+
+/// Emitted when the invoice registry used to resolve sectors changes.
+pub fn invoice_registry_updated(env: &Env, old_registry: Option<Address>, new_registry: &Address) {
+    let topics = (Symbol::new(env, "invoice_registry_updated"),);
+    env.events()
+        .publish(topics, (old_registry, new_registry.clone()));
+}
+
+/// Emitted when the per-fraction listing fee for a sector changes.
+pub fn listing_fee_updated(env: &Env, sector: Sector, old_fee: i128, new_fee: i128) {
+    let topics = (Symbol::new(env, "listing_fee_updated"), sector as u32);
+    env.events().publish(topics, (old_fee, new_fee));
+}
+
+/// Emitted whenever a listing fee is collected from a seller.
+/// Topics: (ListingFeeCollected, invoice_id, seller);
+/// Data: (token, amount, fee_amount, timestamp).
+pub fn listing_fee_collected(
+    env: &Env,
+    invoice_id: &BytesN<32>,
+    seller: &Address,
+    token: &Address,
+    amount: i128,
+    fee_amount: i128,
+) {
+    let topics = (
+        Symbol::new(env, "ListingFeeCollected"),
+        invoice_id.clone(),
+        seller.clone(),
+    );
+    env.events().publish(
+        topics,
+        (token.clone(), amount, fee_amount, env.ledger().timestamp()),
     );
 }

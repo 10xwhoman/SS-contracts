@@ -5,6 +5,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
+    token::{Client as TokenClient, StellarAssetClient},
     xdr::{ContractEvent, ContractEventBody, ScAddress, ScVal},
     Address, Env, Symbol, TryFromVal, TryIntoVal, Val, Vec,
 };
@@ -346,4 +347,140 @@ fn double_initialize_rejected() {
     let ctx = setup(&env);
     let result = ctx.snapshot.try_initialize(&ctx.admin);
     assert_eq!(result, Err(Ok(Error::AlreadyInit)));
+}
+
+// ── Pro-rata distribution ─────────────────────────────────────────────────────
+
+#[test]
+fn get_snapshot_balance_ignores_post_snapshot_changes() {
+    let env = Env::default();
+    let ctx = setup(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &alice, &500);
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &bob, &300);
+    let id = ctx.snapshot.take_snapshot(&ctx.admin, &ctx.inv1);
+
+    // Balances move after the snapshot; the snapshot must not.
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &alice, &0);
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &carol, &900);
+
+    assert_eq!(ctx.snapshot.get_snapshot_balance(&ctx.inv1, &id, &alice), 500);
+    assert_eq!(ctx.snapshot.get_snapshot_balance(&ctx.inv1, &id, &bob), 300);
+    assert_eq!(ctx.snapshot.get_snapshot_balance(&ctx.inv1, &id, &carol), 0);
+    assert_eq!(
+        ctx.snapshot.try_get_snapshot_balance(&ctx.inv1, &99, &alice),
+        Err(Ok(Error::SnapshotNotFound))
+    );
+}
+
+#[test]
+fn list_snapshots_returns_ids_and_timestamps() {
+    let env = Env::default();
+    let ctx = setup(&env);
+    let alice = Address::generate(&env);
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &alice, &100);
+
+    assert_eq!(ctx.snapshot.list_snapshots(&ctx.inv1).len(), 0);
+
+    ctx.snapshot.take_snapshot(&ctx.admin, &ctx.inv1);
+    env.ledger().set_timestamp(START + 100);
+    ctx.snapshot.take_snapshot(&ctx.admin, &ctx.inv1);
+
+    let refs = ctx.snapshot.list_snapshots(&ctx.inv1);
+    assert_eq!(refs.len(), 2);
+    assert_eq!(refs.get(0).unwrap().snapshot_id, 1);
+    assert_eq!(refs.get(0).unwrap().timestamp, START);
+    assert_eq!(refs.get(1).unwrap().snapshot_id, 2);
+    assert_eq!(refs.get(1).unwrap().timestamp, START + 100);
+    assert_eq!(ctx.snapshot.list_snapshots(&ctx.inv2).len(), 0);
+}
+
+#[test]
+fn distribute_from_snapshot_routes_pro_rata_amounts() {
+    let env = Env::default();
+    let ctx = setup(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract_v2(token_admin).address();
+    StellarAssetClient::new(&env, &token).mint(&ctx.admin, &10_000);
+
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &alice, &500);
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &bob, &300);
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &carol, &200);
+    let id = ctx.snapshot.take_snapshot(&ctx.admin, &ctx.inv1);
+
+    // Post-snapshot changes must not affect the split.
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &alice, &1);
+
+    let distributed = ctx
+        .snapshot
+        .distribute_from_snapshot(&ctx.admin, &ctx.inv1, &id, &token, &1_001);
+    // Floored shares: 500, 300, 200 (of 1_001 * 50% / 30% / 20%).
+    assert_eq!(distributed, 500 + 300 + 200);
+
+    let client = TokenClient::new(&env, &token);
+    assert_eq!(client.balance(&alice), 500);
+    assert_eq!(client.balance(&bob), 300);
+    assert_eq!(client.balance(&carol), 200);
+    assert_eq!(client.balance(&ctx.admin), 10_000 - 1_000);
+
+    let mut found = false;
+    for e in env.events().all().events().iter() {
+        if topic_of(&env, e) == Symbol::new(&env, "snapshot_distributed") {
+            found = true;
+        }
+    }
+    assert!(found, "expected snapshot_distributed event");
+}
+
+#[test]
+fn distribute_from_snapshot_guards() {
+    let env = Env::default();
+    let ctx = setup(&env);
+    let alice = Address::generate(&env);
+    let impostor = Address::generate(&env);
+    let token = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+
+    ctx.snapshot
+        .set_holder_balance(&ctx.admin, &ctx.inv1, &alice, &100);
+    let id = ctx.snapshot.take_snapshot(&ctx.admin, &ctx.inv1);
+    let empty_id = ctx.snapshot.take_snapshot(&ctx.admin, &ctx.inv2);
+
+    assert_eq!(
+        ctx.snapshot
+            .try_distribute_from_snapshot(&impostor, &ctx.inv1, &id, &token, &100),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert_eq!(
+        ctx.snapshot
+            .try_distribute_from_snapshot(&ctx.admin, &ctx.inv1, &id, &token, &0),
+        Err(Ok(Error::InvalidAmount))
+    );
+    assert_eq!(
+        ctx.snapshot
+            .try_distribute_from_snapshot(&ctx.admin, &ctx.inv1, &9, &token, &100),
+        Err(Ok(Error::SnapshotNotFound))
+    );
+    assert_eq!(
+        ctx.snapshot
+            .try_distribute_from_snapshot(&ctx.admin, &ctx.inv2, &empty_id, &token, &100),
+        Err(Ok(Error::NothingToDistribute))
+    );
 }

@@ -25,4 +25,8 @@ pub enum Error {
     InvalidAddress = 8,
     /// Arithmetic overflow.
     Overflow = 9,
+    /// No invoice registry has been configured.
+    RegistryNotSet = 10,
+    /// The invoice is not classified in the invoice registry.
+    InvoiceNotRegistered = 11,
 }

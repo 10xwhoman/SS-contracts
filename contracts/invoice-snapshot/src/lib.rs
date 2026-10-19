@@ -7,6 +7,10 @@
 //! demand via `prune_snapshots`). Expired snapshots are also invisible to the
 //! `get_snapshot` / `get_investor_snapshots` reads, so the retention policy
 //! holds even before physical pruning runs.
+//!
+//! A snapshot also serves as the basis for pro-rata airdrop or bonus
+//! distributions (`distribute_from_snapshot`), so holders never need to be
+//! enumerated in real time.
 
 #![no_std]
 
@@ -15,9 +19,9 @@ mod events;
 mod storage;
 mod types;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, Symbol, Vec};
 
-pub use types::{HolderBalance, InvestorSnapshot, Snapshot};
+pub use types::{HolderBalance, InvestorSnapshot, Snapshot, SnapshotRef};
 
 use errors::Error;
 
@@ -167,6 +171,89 @@ impl InvoiceSnapshot {
             return Err(Error::SnapshotNotFound);
         }
         Ok(snapshot)
+    }
+
+    /// View: a wallet's balance inside a snapshot (0 if it held no position).
+    ///
+    /// Reads the immutable snapshot record, so balance changes made after the
+    /// snapshot was taken never affect the result.
+    pub fn get_snapshot_balance(
+        env: Env,
+        invoice_id: Symbol,
+        snapshot_id: u32,
+        wallet: Address,
+    ) -> Result<i128, Error> {
+        let snapshot = Self::get_snapshot(env, invoice_id, snapshot_id)?;
+        for entry in snapshot.balances.iter() {
+            if entry.holder == wallet {
+                return Ok(entry.amount);
+            }
+        }
+        Ok(0)
+    }
+
+    /// View: every live snapshot id and timestamp for an invoice, oldest first.
+    pub fn list_snapshots(env: Env, invoice_id: Symbol) -> Vec<SnapshotRef> {
+        let now = env.ledger().timestamp();
+        let mut refs = Vec::new(&env);
+        for snapshot_id in storage::get_snapshot_index(&env, &invoice_id).iter() {
+            if let Some(snapshot) = storage::get_snapshot(&env, &invoice_id, snapshot_id) {
+                if !Self::snapshot_expired(now, snapshot.timestamp) {
+                    refs.push_back(SnapshotRef {
+                        snapshot_id,
+                        timestamp: snapshot.timestamp,
+                    });
+                }
+            }
+        }
+        refs
+    }
+
+    /// Admin-only: route `total_amount` of `token` pro-rata to every holder in a
+    /// snapshot, weighted by the balances recorded at snapshot time. The funds
+    /// are pulled from `admin`. Each share is floored, so rounding dust stays
+    /// with the admin. Returns the amount actually distributed.
+    pub fn distribute_from_snapshot(
+        env: Env,
+        admin: Address,
+        invoice_id: Symbol,
+        snapshot_id: u32,
+        token: Address,
+        total_amount: i128,
+    ) -> Result<i128, Error> {
+        admin.require_auth();
+        Self::ensure_admin(&env, &admin)?;
+        if total_amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let snapshot = Self::get_snapshot(env.clone(), invoice_id.clone(), snapshot_id)?;
+        if snapshot.total_balance <= 0 {
+            return Err(Error::NothingToDistribute);
+        }
+
+        let token_client = token::Client::new(&env, &token);
+        let mut distributed: i128 = 0;
+        for entry in snapshot.balances.iter() {
+            let share = total_amount
+                .checked_mul(entry.amount)
+                .ok_or(Error::Overflow)?
+                / snapshot.total_balance;
+            if share > 0 {
+                token_client.transfer(&admin, &entry.holder, &share);
+                distributed = distributed.checked_add(share).ok_or(Error::Overflow)?;
+            }
+        }
+
+        events::snapshot_distributed(
+            &env,
+            invoice_id,
+            snapshot_id,
+            token,
+            total_amount,
+            distributed,
+        );
+        Ok(distributed)
     }
 
     /// View: every live snapshot reference for `wallet`, across all invoices

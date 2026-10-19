@@ -23,7 +23,7 @@ pub use types::InstallmentMilestone;
 pub use types::InvoiceCategory;
 use types::{
     CategoryFeeSchedule, Config, DisputeData, EscrowData, FundingInvoice, InstallmentInput,
-    InvoiceData, InvoiceStatus,
+    InvestmentRecord, InvoiceData, InvoiceStatus,
 };
 
 pub use errors::Error;
@@ -1976,6 +1976,152 @@ impl InvoiceEscrow {
         investor: Address,
         amount: i128,
     ) -> Result<(), Error> {
+        Self::invest_core(env, invoice_id, investor, amount, None)
+    }
+
+    /// Admin-only: set the FX oracle contract used to normalise investments
+    /// made in a foreign currency. The oracle must expose
+    /// `get_price(currency: Symbol) -> PriceData` returning the rate of one
+    /// unit of `currency` in base currency (scaled by `decimals`).
+    pub fn set_fx_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), Error> {
+        admin.require_auth();
+        let config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        if config.admin != admin {
+            return Err(Error::Unauthorized);
+        }
+        ensure_non_zero_address(&env, &oracle)?;
+        storage::set_fx_oracle(&env, &oracle);
+        Ok(())
+    }
+
+    /// Admin-only: list `currency` (e.g. USDC, EURC, NGNC) as an accepted
+    /// investment currency paid in `token`.
+    pub fn set_supported_currency(
+        env: Env,
+        admin: Address,
+        currency: Symbol,
+        token: Address,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+        let config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        if config.admin != admin {
+            return Err(Error::Unauthorized);
+        }
+        ensure_non_zero_address(&env, &token)?;
+        storage::set_currency_token(&env, &currency, Some(&token));
+        Ok(())
+    }
+
+    /// Admin-only: remove `currency` from the accepted investment currencies.
+    pub fn remove_supported_currency(
+        env: Env,
+        admin: Address,
+        currency: Symbol,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+        let config = storage::get_config(&env).ok_or(Error::NotInit)?;
+        if config.admin != admin {
+            return Err(Error::Unauthorized);
+        }
+        storage::set_currency_token(&env, &currency, None);
+        Ok(())
+    }
+
+    /// View: the payment token of a supported investment currency, if listed.
+    pub fn get_supported_currency(env: Env, currency: Symbol) -> Option<Address> {
+        storage::get_currency_token(&env, &currency)
+    }
+
+    /// Invest `amount` of `currency` in a funding invoice. The amount is
+    /// converted to base currency at the FX oracle rate fetched now, and the
+    /// normalised base amount is what the investor position, the invoice
+    /// total and every pro-rata share are computed from. Returns the base
+    /// amount credited.
+    pub fn invest_with_currency(
+        env: Env,
+        invoice_id: BytesN<32>,
+        investor: Address,
+        amount: i128,
+        currency: Symbol,
+    ) -> Result<i128, Error> {
+        investor.require_auth();
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        let pay_token =
+            storage::get_currency_token(&env, &currency).ok_or(Error::UnsupportedCurrency)?;
+        let oracle = storage::get_fx_oracle(&env).ok_or(Error::FxOracleNotSet)?;
+        if !storage::has_invoice(&env, invoice_id.clone()) {
+            return Err(Error::EscrowNotFound);
+        }
+
+        let price: PriceData = env.invoke_contract(
+            &oracle,
+            &Symbol::new(&env, "get_price"),
+            (currency.clone(),).into_val(&env),
+        );
+        let now = env.ledger().timestamp();
+        if now.saturating_sub(price.timestamp) > OraclePriceAdapter::DEFAULT_MAX_STALENESS_SECS {
+            return Err(Error::StalePrice);
+        }
+        if price.price <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        let scale = 10_i128
+            .checked_pow(price.decimals)
+            .ok_or(Error::Overflow)?;
+        let base_amount = amount
+            .checked_mul(price.price)
+            .ok_or(Error::Overflow)?
+            / scale;
+        if base_amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        Self::invest_core(
+            env.clone(),
+            invoice_id.clone(),
+            investor.clone(),
+            base_amount,
+            Some((pay_token, amount)),
+        )?;
+
+        storage::add_investment_record(
+            &env,
+            &invoice_id,
+            &investor,
+            &InvestmentRecord {
+                currency: currency.clone(),
+                amount,
+                rate: price.price,
+                decimals: price.decimals,
+                base_amount,
+                timestamp: now,
+            },
+        );
+        events::currency_invested(&env, &invoice_id, &investor, &currency, amount, base_amount);
+        Ok(base_amount)
+    }
+
+    /// View: multi-currency investment records for an investor on an invoice.
+    pub fn get_investment_records(
+        env: Env,
+        invoice_id: BytesN<32>,
+        investor: Address,
+    ) -> Vec<InvestmentRecord> {
+        storage::get_investment_records(&env, &invoice_id, &investor)
+    }
+
+    /// Shared investment path. `amount` is the base-currency amount credited
+    /// to the position; `foreign` is the (token, amount) actually paid when the
+    /// investment is made in another currency (funding invoices only).
+    fn invest_core(
+        env: Env,
+        invoice_id: BytesN<32>,
+        investor: Address,
+        amount: i128,
+        foreign: Option<(Address, i128)>,
+    ) -> Result<(), Error> {
         investor.require_auth();
         if amount <= 0 {
             return Err(Error::InvalidAmount);
@@ -2007,8 +2153,12 @@ impl InvoiceEscrow {
                     return Err(Error::InvalidAmount);
                 }
             }
-            let token_client = token::Client::new(&env, &invoice.token);
-            token_client.transfer(&investor, env.current_contract_address(), &amount);
+            let (pay_token, pay_amount) = match &foreign {
+                Some((pay_token, paid)) => (pay_token.clone(), *paid),
+                None => (invoice.token.clone(), amount),
+            };
+            let token_client = token::Client::new(&env, &pay_token);
+            token_client.transfer(&investor, env.current_contract_address(), &pay_amount);
             storage::set_investor_position(&env, &invoice_id, &investor, new_pos);
             invoice.total_raised = new_total;
             if !invoice.threshold_reached && new_total >= invoice.min_funding_threshold {
@@ -2631,6 +2781,8 @@ mod integration_test;
 mod test;
 #[cfg(test)]
 mod test_buy_limit;
+#[cfg(test)]
+mod test_multi_currency;
 
 // Modules added for batch resolution of #479, #480, #481
 pub mod insurance_pool;

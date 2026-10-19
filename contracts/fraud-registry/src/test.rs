@@ -3,7 +3,7 @@
 
 use super::*;
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{Address, BytesN, Env, Symbol, TryFromVal, TryIntoVal, Val, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Symbol, TryFromVal, TryIntoVal, Val, Vec};
 
 use crate::types::{FraudReport, ReportOutcome, ReportStatus};
 
@@ -105,6 +105,7 @@ fn test_submit_report_happy_path() {
     assert_eq!(report.status, ReportStatus::Active);
     assert_eq!(report.resolved, 0);
     assert!(report.resolver.is_none());
+    assert_eq!(report.notes, String::from_str(&s.env, ""));
 }
 
 #[test]
@@ -280,7 +281,7 @@ fn test_fraud_report_submitted_event() {
     s.client
         .submit_report(&s.investor_a, &s.invoice, &reason, &detail);
 
-    assert!(has_event(&s.env, "FraudReportSubmitted"));
+    assert!(has_event(&s.env, "ReportSubmitted"));
 }
 
 #[test]
@@ -294,7 +295,7 @@ fn test_fraud_report_resolved_event() {
         .submit_report(&s.investor_a, &s.invoice, &reason, &detail);
     s.client.resolve_report(&report_id, &ReportOutcome::Confirmed);
 
-    assert!(has_event(&s.env, "FraudReportResolved"));
+    assert!(has_event(&s.env, "ReportResolved"));
 }
 
 #[test]
@@ -367,4 +368,79 @@ fn test_admin_cannot_submit_report() {
         .client
         .try_submit_report(&s.admin, &s.invoice, &reason, &detail);
     assert!(r.is_err());
+}
+
+#[test]
+fn test_duplicate_report_rejected_with_already_reported() {
+    let s = Setup::new();
+    let reason = Symbol::new(&s.env, "fake_inv");
+    let detail = test_hash(&s.env, "ev");
+
+    s.client
+        .submit_report(&s.investor_a, &s.invoice, &reason, &detail);
+    let r = s
+        .client
+        .try_submit_report(&s.investor_a, &s.invoice, &reason, &detail);
+    assert_eq!(r, Err(Ok(Error::AlreadyReported)));
+}
+
+#[test]
+fn test_review_report_records_notes_and_requires_admin() {
+    let s = Setup::new();
+    let reason = Symbol::new(&s.env, "fake_inv");
+    let detail = test_hash(&s.env, "ev");
+    let notes = String::from_str(&s.env, "checked against ledger");
+
+    let report_id = s
+        .client
+        .submit_report(&s.investor_a, &s.invoice, &reason, &detail);
+    s.client
+        .review_report(&report_id, &ReportOutcome::Dismissed, &notes);
+
+    let report = s.client.get_report(&report_id);
+    assert_eq!(report.status, ReportStatus::Dismissed);
+    assert_eq!(report.notes, notes);
+    assert_eq!(report.resolver, Some(s.admin.clone()));
+    assert!(has_event(&s.env, "ReportResolved"));
+
+    // Already resolved reports cannot be reviewed again.
+    let again = s
+        .client
+        .try_review_report(&report_id, &ReportOutcome::Confirmed, &notes);
+    assert_eq!(again, Err(Ok(Error::AlreadyResolved)));
+}
+
+#[contract]
+struct MockInvoiceRegistry;
+
+#[contractimpl]
+impl MockInvoiceRegistry {
+    pub fn mark_under_review(env: Env, caller: Address, invoice_id: BytesN<32>) {
+        caller.require_auth();
+        env.storage().instance().set(&invoice_id, &true);
+    }
+
+    pub fn is_under_review(env: Env, invoice_id: BytesN<32>) -> bool {
+        env.storage().instance().get(&invoice_id).unwrap_or(false)
+    }
+}
+
+#[test]
+fn test_first_report_flags_invoice_under_review() {
+    let s = Setup::new();
+    let registry_id = s.env.register_contract(None, MockInvoiceRegistry);
+    let registry = MockInvoiceRegistryClient::new(&s.env, &registry_id);
+    s.client.set_invoice_registry(&registry_id);
+    assert_eq!(s.client.get_invoice_registry(), registry_id);
+
+    let reason = Symbol::new(&s.env, "fake_inv");
+    let detail = test_hash(&s.env, "ev");
+    assert!(!registry.is_under_review(&s.invoice));
+
+    s.client
+        .submit_report(&s.investor_a, &s.invoice, &reason, &detail);
+    assert!(registry.is_under_review(&s.invoice));
+
+    // Other invoices stay unflagged.
+    assert!(!registry.is_under_review(&test_hash(&s.env, "invoice-002")));
 }

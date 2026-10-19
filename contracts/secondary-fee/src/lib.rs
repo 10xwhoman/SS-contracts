@@ -10,6 +10,10 @@
 //! itself — the contract first spends its own balance if it covers the sale
 //! and otherwise transfers from the calling market contract. Either way the
 //! seller receives the net amount and the treasury receives the fee.
+//!
+//! It also charges a listing fee when a seller lists fractions for sale: a flat
+//! rate per fraction listed, configured by the admin per invoice sector and
+//! routed to the treasury (`get_listing_fee` / `collect_listing_fee`).
 
 #![no_std]
 
@@ -18,9 +22,9 @@ mod events;
 mod storage;
 mod types;
 
-pub use types::FeeReceipt;
+pub use types::{FeeReceipt, RegistryAssignment, Sector};
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol};
+use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env, IntoVal, String, Symbol};
 
 use errors::Error;
 
@@ -63,6 +67,30 @@ fn compute_fee(
         net_amount,
         fee_amount,
     })
+}
+
+/// Resolve an invoice's sector through the configured invoice registry.
+fn invoice_sector(env: &Env, invoice_id: &BytesN<32>) -> Result<Sector, Error> {
+    let registry = storage::get_invoice_registry(env).ok_or(Error::RegistryNotSet)?;
+    match env.try_invoke_contract::<RegistryAssignment, soroban_sdk::Error>(
+        &registry,
+        &Symbol::new(env, "get_category"),
+        (invoice_id.clone(),).into_val(env),
+    ) {
+        Ok(Ok(assignment)) => Ok(assignment.category),
+        _ => Err(Error::InvoiceNotRegistered),
+    }
+}
+
+/// Total listing fee for `amount` fractions of an invoice.
+fn listing_fee(env: &Env, invoice_id: &BytesN<32>, amount: i128) -> Result<i128, Error> {
+    if amount <= 0 {
+        return Err(Error::InvalidAmount);
+    }
+    let sector = invoice_sector(env, invoice_id)?;
+    storage::get_listing_fee(env, sector)
+        .checked_mul(amount)
+        .ok_or(Error::Overflow)
 }
 
 #[contract]
@@ -207,6 +235,92 @@ impl SecondaryFee {
 
         events::secondary_fee_collected(&env, &listing_id, &seller, &token, &receipt);
         Ok(receipt)
+    }
+
+    /// Admin-only: bind the invoice registry used to resolve an invoice's sector.
+    pub fn set_invoice_registry(
+        env: Env,
+        admin: Address,
+        new_registry: Address,
+    ) -> Result<(), Error> {
+        let stored_admin = storage::get_admin(&env).ok_or(Error::NotInit)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        ensure_non_zero_address(&env, &new_registry)?;
+        admin.require_auth();
+        let old_registry = storage::get_invoice_registry(&env);
+        storage::set_invoice_registry(&env, &new_registry);
+        events::invoice_registry_updated(&env, old_registry, &new_registry);
+        Ok(())
+    }
+
+    /// Admin-only: set the flat listing fee charged per fraction listed for a
+    /// sector. A fee of `0` disables the listing fee for that sector.
+    pub fn set_listing_fee(
+        env: Env,
+        admin: Address,
+        sector: Sector,
+        fee_per_fraction: i128,
+    ) -> Result<(), Error> {
+        let stored_admin = storage::get_admin(&env).ok_or(Error::NotInit)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        if fee_per_fraction < 0 {
+            return Err(Error::InvalidAmount);
+        }
+        admin.require_auth();
+        let old_fee = storage::get_listing_fee(&env, sector);
+        storage::set_listing_fee(&env, sector, fee_per_fraction);
+        events::listing_fee_updated(&env, sector, old_fee, fee_per_fraction);
+        Ok(())
+    }
+
+    /// View: total listing fee for listing `amount` fractions of an invoice,
+    /// at the flat per-fraction rate of the invoice's sector.
+    pub fn get_listing_fee(env: Env, invoice_id: BytesN<32>, amount: i128) -> Result<i128, Error> {
+        storage::get_admin(&env).ok_or(Error::NotInit)?;
+        listing_fee(&env, &invoice_id, amount)
+    }
+
+    /// Charge the listing fee for creating a listing of `amount` fractions.
+    ///
+    /// Must be called by the secondary market contract bound via
+    /// `set_secondary_market` from inside its listing creation, so a seller who
+    /// cannot cover the fee gets the whole listing rejected. The fee is moved
+    /// from `seller` to the treasury and `ListingFeeCollected` is emitted.
+    ///
+    /// Returns the fee collected.
+    pub fn collect_listing_fee(
+        env: Env,
+        caller: Address,
+        seller: Address,
+        invoice_id: BytesN<32>,
+        amount: i128,
+        token: Address,
+    ) -> Result<i128, Error> {
+        storage::get_admin(&env).ok_or(Error::NotInit)?;
+        let market = storage::get_secondary_market(&env).ok_or(Error::SecondaryMarketNotSet)?;
+        if caller != market {
+            return Err(Error::Unauthorized);
+        }
+        caller.require_auth();
+        ensure_non_zero_address(&env, &seller)?;
+        ensure_non_zero_address(&env, &token)?;
+
+        let fee = listing_fee(&env, &invoice_id, amount)?;
+        if fee > 0 {
+            let treasury = storage::get_treasury(&env).ok_or(Error::NotInit)?;
+            let token_client = token::Client::new(&env, &token);
+            if token_client.balance(&seller) < fee {
+                return Err(Error::InsufficientBalance);
+            }
+            token_client.transfer(&seller, &treasury, &fee);
+        }
+
+        events::listing_fee_collected(&env, &invoice_id, &seller, &token, amount, fee);
+        Ok(fee)
     }
 
     /// View: preview the seller/treasury split for a hypothetical sale.

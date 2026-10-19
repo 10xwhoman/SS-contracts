@@ -14,8 +14,8 @@ pub enum Error {
     Unauthorized = 3,
     /// Caller is not a whitelisted investor.
     NotWhitelisted = 4,
-    /// An active report already exists for this (invoice, reporter) pair.
-    ActiveReportExists = 5,
+    /// This wallet already has an active report against the invoice.
+    AlreadyReported = 5,
     /// No report found for the given report id.
     ReportNotFound = 6,
     /// Report has already been resolved.
@@ -26,4 +26,6 @@ pub enum Error {
     AlreadyWhitelisted = 9,
     /// Not currently whitelisted (cannot remove).
     NotWhitelistedErr = 10,
+    /// No invoice registry has been configured.
+    RegistryNotSet = 11,
 }

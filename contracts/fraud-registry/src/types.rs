@@ -1,6 +1,6 @@
 //! Data types for the fraud report registry contract.
 
-use soroban_sdk::{contracttype, Address, BytesN, Symbol};
+use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
 
 /// Lifecycle status of a fraud report.
 #[contracttype]
@@ -43,6 +43,8 @@ pub enum StorageKey {
     ActiveReport(BytesN<32>, Address),
     /// Instance: next report id counter.
     ReportCount,
+    /// Instance: invoice registry contract notified of reported invoices.
+    InvoiceRegistry,
 }
 
 /// Global configuration.
@@ -75,4 +77,6 @@ pub struct FraudReport {
     pub resolved: u64,
     /// Admin that resolved the report (unset while active).
     pub resolver: Option<Address>,
+    /// Resolution notes supplied by the admin (empty while active).
+    pub notes: String,
 }

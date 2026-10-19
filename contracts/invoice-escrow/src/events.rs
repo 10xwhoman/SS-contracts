@@ -462,3 +462,20 @@ pub fn param_change_executed(env: &Env, proposal: &crate::types::PendingParamCha
         (proposal.param as u32, proposal.new_value),
     );
 }
+
+// ── Multi-currency investment events ──────────────────────────────────────────
+
+/// Publish a multi-currency investment with its normalised base amount.
+pub fn currency_invested(
+    env: &Env,
+    invoice_id: &BytesN<32>,
+    investor: &Address,
+    currency: &Symbol,
+    amount: i128,
+    base_amount: i128,
+) {
+    env.events().publish(
+        (Symbol::new(env, "currency_invested"), invoice_id.clone()),
+        (investor.clone(), currency.clone(), amount, base_amount),
+    );
+}

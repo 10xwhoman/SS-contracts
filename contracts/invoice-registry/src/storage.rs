@@ -74,3 +74,42 @@ pub fn set_index(env: &Env, category: InvoiceCategory, index: &Vec<BytesN<32>>) 
     env.storage().persistent().set(&key, index);
     bump_persistent(env, &key);
 }
+
+/// Set the contract allowed to flag invoices as under review.
+pub fn set_review_authority(env: &Env, authority: &Address) {
+    env.storage()
+        .instance()
+        .set(&StorageKey::ReviewAuthority, authority);
+    env.storage()
+        .instance()
+        .extend_ttl(TTL_THRESHOLD, MIN_TTL_EXTEND);
+}
+
+/// Load the contract allowed to flag invoices as under review.
+pub fn get_review_authority(env: &Env) -> Option<Address> {
+    env.storage()
+        .instance()
+        .extend_ttl(TTL_THRESHOLD, MIN_TTL_EXTEND);
+    env.storage().instance().get(&StorageKey::ReviewAuthority)
+}
+
+/// Whether an invoice is currently flagged as under review.
+pub fn is_under_review(env: &Env, invoice_id: &BytesN<32>) -> bool {
+    let key = StorageKey::UnderReview(invoice_id.clone());
+    let flagged = env.storage().persistent().get(&key).unwrap_or(false);
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    flagged
+}
+
+/// Set or clear an invoice's under-review flag.
+pub fn set_under_review(env: &Env, invoice_id: &BytesN<32>, flagged: bool) {
+    let key = StorageKey::UnderReview(invoice_id.clone());
+    if flagged {
+        env.storage().persistent().set(&key, &true);
+        bump_persistent(env, &key);
+    } else {
+        env.storage().persistent().remove(&key);
+    }
+}

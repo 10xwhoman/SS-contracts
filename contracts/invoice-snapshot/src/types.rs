@@ -66,3 +66,13 @@ pub struct InvestorSnapshot {
     /// The wallet's balance in that snapshot.
     pub balance: i128,
 }
+
+/// A lightweight reference to one live snapshot, returned by `list_snapshots`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SnapshotRef {
+    /// Snapshot id within the invoice.
+    pub snapshot_id: u32,
+    /// Ledger timestamp the snapshot was taken at.
+    pub timestamp: u64,
+}
