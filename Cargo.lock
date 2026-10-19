@@ -965,6 +965,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
+name = "fee-discount"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
 name = "fee-treasury"
 version = "0.1.0"
 dependencies = [
@@ -1250,6 +1257,13 @@ dependencies = [
 
 [[package]]
 name = "investor-scoring"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
+name = "invoice-co-investment"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk 27.0.6",
@@ -1579,6 +1593,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pool-rebalance"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1773,6 +1794,13 @@ name = "referral"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk 21.7.7",
+]
+
+[[package]]
+name = "referral-tier-upgrade"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
 ]
 
 [[package]]

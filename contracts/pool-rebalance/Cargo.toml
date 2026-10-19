@@ -1,0 +1,15 @@
+[package]
+name = "pool-rebalance"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Invoice pool rebalance contract for dynamic weight adjustments"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
